@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { relaunch } from '@tauri-apps/plugin-process';
+  import { check, type Update } from '@tauri-apps/plugin-updater';
   import { api } from './api';
   import ActiveSummary from './components/ActiveSummary.svelte';
   import EditableInvestment from './components/EditableInvestment.svelte';
@@ -34,6 +36,10 @@
   let strategies: Strategy[] = [];
   let reports: ReportsData | null = null;
   let tick = Date.now();
+  let updateInfo: { version: string; body?: string } | null = null;
+  let pendingUpdate: Update | null = null;
+  let updating = false;
+  let updateProgress = '';
 
   let newSession = {
     strategy_id: null as number | null,
@@ -92,8 +98,37 @@
       await loadShared();
       await loadRoute();
       ready = true;
+      void checkForUpdate();
     } catch (err) {
       error = String(err);
+    }
+  }
+
+  async function checkForUpdate() {
+    if (!('__TAURI_INTERNALS__' in window)) return;
+    try {
+      const update = await check();
+      if (update) {
+        pendingUpdate = update;
+        updateInfo = { version: update.version, body: update.body };
+      }
+    } catch (err) {
+      console.warn('Update check failed', err);
+    }
+  }
+
+  async function installUpdate() {
+    if (!pendingUpdate) return;
+    updating = true;
+    try {
+      await pendingUpdate.downloadAndInstall((event) => {
+        if (event.event === 'Started') updateProgress = 'Downloading...';
+        if (event.event === 'Finished') updateProgress = 'Installing...';
+      });
+      await relaunch();
+    } catch (err) {
+      error = String(err);
+      updating = false;
     }
   }
 
@@ -371,6 +406,18 @@
   </aside>
 
   <section class="content">
+    {#if updateInfo}
+      <div class="notice">
+        Version {updateInfo.version} is available.
+        <button on:click={installUpdate} disabled={updating}>
+          {updating ? (updateProgress || 'Updating...') : 'Update and restart'}
+        </button>
+        {#if !updating}
+          <button class="ghost" on:click={() => (updateInfo = null)}>Later</button>
+        {/if}
+      </div>
+    {/if}
+
     {#if error}
       <div class="notice danger">{error}</div>
     {/if}

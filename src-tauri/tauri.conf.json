@@ -26,6 +26,18 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEM2NDVCRDc1RDNEOTNBOEEKUldTS090blRkYjFGeHJ0OHY4bjNJa0hyTzZIclBYVlRRT0FMaGJIOHl4b2NXQ3JGZ2phcnRWUVYK",
+      "endpoints": [
+        "https://github.com/FlipJaxx/PoE2-Farm-Ledger/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }
