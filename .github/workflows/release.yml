@@ -6,30 +6,35 @@ on:
       - 'v*'
 
 jobs:
-  release:
+  windows-test-release:
+    name: Windows test release
     permissions:
       contents: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: windows-latest
-            args: ''
-    runs-on: ${{ matrix.platform }}
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install frontend dependencies
-        run: npm install
+        run: npm ci
 
-      - name: Build and release
+      - name: Build frontend
+        run: npm run build
+
+      - name: Check Svelte and TypeScript
+        run: npx svelte-check --tsconfig ./tsconfig.json
+
+      - name: Run Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Build signed Tauri test release
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -37,8 +42,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: 'Exile Farm Ledger ${{ github.ref_name }}'
-          releaseBody: 'See the changes in this version below.'
+          releaseName: 'Exile Farm Ledger ${{ github.ref_name }} test release'
+          releaseBody: 'Test release for Exile Farm Ledger. Windows may show SmartScreen warnings because the installer is not code-signed.'
           releaseDraft: false
-          prerelease: false
-          args: ${{ matrix.args }}
+          prerelease: true
