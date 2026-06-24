@@ -1,12 +1,9 @@
 <script lang="ts">
   import type { ReportRow } from '../types';
+  import { fmtNumber, fmtValue } from '../format';
 
   export let rows: ReportRow[];
   export let compact = false;
-
-  function fmt(value: number, digits = 1) {
-    return Number.isFinite(value) ? value.toLocaleString(undefined, { maximumFractionDigits: digits }) : '0';
-  }
 
   function duration(seconds: number) {
     const h = Math.floor(seconds / 3600);
@@ -23,20 +20,20 @@
   </thead>
   <tbody>
     {#if rows.length === 0}
-      <tr><td class="empty" colspan={compact ? 5 : 9}>Ingen fullførte økter ennå.</td></tr>
+      <tr><td class="empty" colspan={compact ? 5 : 9}>No completed sessions yet.</td></tr>
     {:else}
       {#each rows as row}
       <tr>
         <td>{row.group_name}</td>
         <td>{row.sessions}</td>
-        <td>{fmt(row.average_profit_per_hour)}</td>
-        <td>{fmt(row.average_profit_per_map)}</td>
+        <td>{fmtNumber(row.average_profit_per_hour)}</td>
+        <td>{fmtNumber(row.average_profit_per_map)}</td>
         <td>{row.total_maps}</td>
         {#if !compact}
           <td>{duration(row.total_time_seconds)}</td>
-          <td class:profit={row.total_net_profit >= 0} class:loss={row.total_net_profit < 0}>{fmt(row.total_net_profit)} ex</td>
-          <td>{fmt(row.best_session_profit)} ex</td>
-          <td>{fmt(row.worst_session_profit)} ex</td>
+          <td class:profit={row.total_net_profit >= 0} class:loss={row.total_net_profit < 0}>{fmtValue(row.total_net_profit)}</td>
+          <td>{fmtValue(row.best_session_profit)}</td>
+          <td>{fmtValue(row.worst_session_profit)}</td>
         {/if}
       </tr>
       {/each}

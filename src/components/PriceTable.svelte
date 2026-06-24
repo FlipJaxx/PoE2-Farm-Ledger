@@ -16,7 +16,7 @@
   </thead>
   <tbody>
     {#if rows.length === 0}
-      <tr><td class="empty" colspan={move ? 3 : 2}>Ingen oppføringer ennå.</td></tr>
+      <tr><td class="empty" colspan={move ? 3 : 2}>No entries yet.</td></tr>
     {:else}
       {#each rows as row, index}
         <tr>

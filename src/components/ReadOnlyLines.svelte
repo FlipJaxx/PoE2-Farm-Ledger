@@ -12,7 +12,7 @@
     <thead><tr><th>Type</th><th>Name</th><th>Count</th><th>Value/ex</th><th>Total</th></tr></thead>
     <tbody>
       {#if rows.length === 0}
-        <tr><td class="empty" colspan="5">Ingen data ennå.</td></tr>
+        <tr><td class="empty" colspan="5">No data yet.</td></tr>
       {:else}
         {#each rows as line}
         <tr>

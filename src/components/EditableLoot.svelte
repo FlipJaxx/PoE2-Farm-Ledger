@@ -16,7 +16,7 @@
     </thead>
     <tbody>
       {#if rows.length === 0}
-        <tr><td class="empty" colspan="4">Ingen data ennå.</td></tr>
+        <tr><td class="empty" colspan="4">No data yet.</td></tr>
       {:else}
         {#each rows as line}
         <tr>

@@ -8,6 +8,7 @@
   import ReadOnlyLines from './components/ReadOnlyLines.svelte';
   import ReportTable from './components/ReportTable.svelte';
   import SessionTable from './components/SessionTable.svelte';
+  import { fmtNumber as fmt, fmtDivines, setDivineRate } from './format';
   import type {
     ChaseItem,
     Currency,
@@ -87,6 +88,7 @@
   async function boot() {
     try {
       await api.initializeDatabase();
+      await refreshDivineRate();
       await loadShared();
       await loadRoute();
       ready = true;
@@ -97,6 +99,17 @@
 
   async function loadShared() {
     [mechanics, strategies] = await Promise.all([api.mechanics(), api.strategies()]);
+  }
+
+  async function refreshDivineRate() {
+    try {
+      const cur = await api.currencies();
+      currencies = cur;
+      const divine = cur.find((currency) => currency.name === 'Divine Orb');
+      setDivineRate(divine?.value_in_exalts ?? 120);
+    } catch {
+      // Keep the previous rate if the price list cannot be loaded yet.
+    }
   }
 
   async function loadRoute() {
@@ -119,10 +132,6 @@
     history.pushState({}, '', next);
     path = next;
     loadRoute();
-  }
-
-  function fmt(value: number, digits = 1) {
-    return Number.isFinite(value) ? value.toLocaleString(undefined, { maximumFractionDigits: digits }) : '0';
   }
 
   function duration(seconds: number) {
@@ -222,6 +231,7 @@
 
   async function saveCurrency(currency: Currency) {
     await api.updateCurrencyValue(currency.id, Number(currency.value_in_exalts) || 0);
+    await refreshDivineRate();
   }
 
   async function moveCurrency(currency: Currency, direction: -1 | 1) {
@@ -250,6 +260,7 @@
       await api.createCustomCurrency(newCurrency.name, newCurrency.short_name, newCurrency.value_in_exalts);
       newCurrency = { name: '', short_name: '', value_in_exalts: 0 };
       [currencies, chaseItems] = await Promise.all([api.currencies(), api.chaseItems()]);
+      await refreshDivineRate();
     } catch (err) {
       error = String(err);
     }
@@ -356,8 +367,8 @@
         <div class="metric-grid">
           <article>
             <span>Total profit</span>
-            <strong class:profit={dashboard.total_profit_exalts >= 0} class:loss={dashboard.total_profit_exalts < 0}>{fmt(dashboard.total_profit_exalts)} ex</strong>
-            <small>{fmt(dashboard.total_profit_divines, 2)} div</small>
+            <strong class:profit={dashboard.total_profit_exalts >= 0} class:loss={dashboard.total_profit_exalts < 0}>{fmtDivines(dashboard.total_profit_exalts)}</strong>
+            <small>{fmt(dashboard.total_profit_exalts)} ex</small>
           </article>
           <article><span>Sessions</span><strong>{dashboard.total_sessions}</strong><small>completed</small></article>
           <article><span>Maps</span><strong>{dashboard.total_maps}</strong><small>logged runs</small></article>
@@ -410,7 +421,7 @@
       {#if !active}
         <section class="panel"><p class="muted">No running session.</p><button on:click={() => go('/sessions/new')}>Start one</button></section>
       {:else}
-        <ActiveSummary detail={active} runningSeconds={runningDuration(active.session)} {fmt} {duration} />
+        <ActiveSummary detail={active} runningSeconds={runningDuration(active.session)} {duration} />
         <section class="panel run-counter">
           <button on:click={() => changeMaps(-1)}>-1</button>
           <label>Maps / runs<input type="number" min="0" bind:value={active.session.maps_run} on:change={(e) => setMaps(Number(e.currentTarget.value))} /></label>
@@ -452,7 +463,7 @@
     {:else if path.match(/^\/sessions\/\d+$/)}
       <header class="page-head"><h1>Session Detail</h1><button on:click={() => go('/')}>Back</button></header>
       {#if selectedSession}
-        <ActiveSummary detail={selectedSession} runningSeconds={selectedSession.session.duration_seconds} {fmt} {duration} />
+        <ActiveSummary detail={selectedSession} runningSeconds={selectedSession.session.duration_seconds} {duration} />
         <ReadOnlyLines title="Loot" rows={selectedSession.loot} {fmt} />
         <ReadOnlyLines title="Investments" rows={selectedSession.investments} {fmt} />
       {/if}
@@ -501,7 +512,7 @@
             <thead><tr><th>Name</th><th>Mechanic</th><th></th></tr></thead>
             <tbody>
               {#if strategies.length === 0}
-                <tr><td class="empty" colspan="3">Ingen lagrede strategier.</td></tr>
+                <tr><td class="empty" colspan="3">No saved strategies.</td></tr>
               {:else}
                 {#each strategies as s}
                   <tr><td>{s.name}</td><td>{s.mechanic_name || 'None'}</td><td class="row-actions"><button on:click={() => editStrategy(s)}>Edit</button><button class="ghost" on:click={() => deleteStrategy(s.id)}>Delete</button></td></tr>
@@ -522,7 +533,7 @@
           <thead><tr><th>Name</th><th>Description</th><th>Type</th></tr></thead>
           <tbody>
             {#if mechanics.length === 0}
-              <tr><td class="empty" colspan="3">Ingen mekanikker.</td></tr>
+              <tr><td class="empty" colspan="3">No mechanics.</td></tr>
             {:else}
               {#each mechanics as mechanic}
                 <tr><td>{mechanic.name}</td><td>{mechanic.description}</td><td>{mechanic.is_default ? 'Default' : 'Custom'}</td></tr>
