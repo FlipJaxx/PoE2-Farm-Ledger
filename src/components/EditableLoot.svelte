@@ -5,6 +5,7 @@
   export let title: string;
   export let rows: SessionLine[];
   export let updateLoot: (line: SessionLine) => Promise<void>;
+  export let removeLoot: ((line: SessionLine) => Promise<void>) | null = null;
   export let divineRate = 0;
   export let embedded = false;
 
@@ -25,11 +26,11 @@
   <h2>{title}</h2>
   <table>
     <thead>
-      <tr><th>Name</th><th>Count</th><th>Value/{unit}</th><th>Total</th></tr>
+      <tr><th>Name</th><th>Count</th><th>Value/{unit}</th><th>Total</th>{#if removeLoot}<th></th>{/if}</tr>
     </thead>
     <tbody>
       {#if rows.length === 0}
-        <tr><td class="empty" colspan="4">No entries yet.</td></tr>
+        <tr><td class="empty" colspan={removeLoot ? 5 : 4}>No entries yet.</td></tr>
       {:else}
         {#each rows as line}
         <tr>
@@ -45,6 +46,13 @@
             />
           </td>
           <td>{fmtValue(line.total_value_exalts, divineRate || undefined)}</td>
+          {#if removeLoot}
+            <td class="row-actions">
+              {#if line.item_type === 'custom'}
+                <button class="ghost danger-button" on:click={() => removeLoot?.(line)}>Remove</button>
+              {/if}
+            </td>
+          {/if}
         </tr>
         {/each}
       {/if}

@@ -370,6 +370,38 @@ label {
   font-size: 13px;
 }
 
+.field-block {
+  display: grid;
+  gap: 8px;
+}
+
+.field-block > span {
+  color: #aeb8b5;
+  font-size: 13px;
+}
+
+.table-editor {
+  display: grid;
+  gap: 10px;
+}
+
+.selector-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px 12px;
+}
+
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+}
+
+.check-row input {
+  width: auto;
+}
+
 .span-2 {
   grid-column: span 2;
 }

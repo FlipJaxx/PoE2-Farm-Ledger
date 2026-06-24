@@ -4,6 +4,8 @@
   import { check, type Update } from '@tauri-apps/plugin-updater';
   import { api } from './api';
   import ActiveSummary from './components/ActiveSummary.svelte';
+  import DefaultChaseSelector from './components/DefaultChaseSelector.svelte';
+  import DefaultInvestmentEditor from './components/DefaultInvestmentEditor.svelte';
   import EditableInvestment from './components/EditableInvestment.svelte';
   import EditableLoot from './components/EditableLoot.svelte';
   import PriceTable from './components/PriceTable.svelte';
@@ -29,6 +31,7 @@
   let dashboard: DashboardData | null = null;
   let active: SessionDetail | null = null;
   let selectedSession: SessionDetail | null = null;
+  let editingHistorical = false;
   let sessions: FarmSession[] = [];
   let currencies: Currency[] = [];
   let chaseItems: ChaseItem[] = [];
@@ -133,7 +136,7 @@
   }
 
   async function loadShared() {
-    [mechanics, strategies] = await Promise.all([api.mechanics(), api.strategies()]);
+    [mechanics, strategies, chaseItems] = await Promise.all([api.mechanics(), api.strategies(), api.chaseItems()]);
   }
 
   async function refreshDivineRate() {
@@ -157,7 +160,10 @@
       if (path === '/reports') reports = await api.reports();
       if (path === '/sessions' || path.startsWith('/sessions/')) sessions = await api.sessions();
       const sessionMatch = path.match(/^\/sessions\/(\d+)$/);
-      if (sessionMatch) selectedSession = await api.session(Number(sessionMatch[1]));
+      if (sessionMatch) {
+        selectedSession = await api.session(Number(sessionMatch[1]));
+        editingHistorical = false;
+      }
     } catch (err) {
       error = String(err);
     }
@@ -217,6 +223,11 @@
     });
   }
 
+  async function removeActiveLoot(line: SessionLine) {
+    if (!active) return;
+    active = await api.deleteLootLine(line.id);
+  }
+
   async function addCustomLoot() {
     if (!active || !customLoot.item_name.trim()) return;
     active = await api.updateLoot({
@@ -245,6 +256,39 @@
     if (!active) return;
     active = await api.updateInvestment({
       session_id: active.session.id,
+      investment_type: line.investment_type || 'Misc',
+      item_name: line.item_name,
+      count: Number(line.count) || 0,
+      value_in_exalts: Number(line.value_in_exalts_snapshot) || 0
+    });
+  }
+
+  async function removeActiveInvestment(line: SessionLine) {
+    if (!active) return;
+    active = await api.deleteInvestmentLine(line.id);
+  }
+
+  async function setSelectedMaps(value: number) {
+    if (!selectedSession) return;
+    selectedSession.session = await api.updateMaps(selectedSession.session.id, value);
+    selectedSession = await api.session(selectedSession.session.id);
+  }
+
+  async function updateSelectedLoot(line: SessionLine) {
+    if (!selectedSession) return;
+    selectedSession = await api.updateLoot({
+      session_id: selectedSession.session.id,
+      item_type: line.item_type || 'custom',
+      item_name: line.item_name,
+      count: Number(line.count) || 0,
+      value_in_exalts: Number(line.value_in_exalts_snapshot) || 0
+    });
+  }
+
+  async function updateSelectedInvestment(line: SessionLine) {
+    if (!selectedSession) return;
+    selectedSession = await api.updateInvestment({
+      session_id: selectedSession.session.id,
       investment_type: line.investment_type || 'Misc',
       item_name: line.item_name,
       count: Number(line.count) || 0,
@@ -510,7 +554,13 @@
             <input type="number" min="0" step="0.01" bind:value={customLoot.value_in_exalts} />
             <button on:click={addCustomLoot}>Add</button>
           </div>
-          <EditableLoot title="Logged custom loot" rows={active.loot.filter((l) => l.item_type === 'custom')} {updateLoot} embedded />
+          <EditableLoot
+            title="Logged custom loot"
+            rows={active.loot.filter((l) => l.item_type === 'custom')}
+            {updateLoot}
+            removeLoot={removeActiveLoot}
+            embedded
+          />
         </section>
 
         <section class="panel">
@@ -522,7 +572,12 @@
             <input type="number" min="0" step="0.01" bind:value={investment.value_in_exalts} />
             <button on:click={addInvestment}>Add</button>
           </div>
-          <EditableInvestment rows={active.investments} {updateInvestment} {fmt} />
+          <EditableInvestment
+            rows={active.investments}
+            {updateInvestment}
+            removeInvestment={removeActiveInvestment}
+            {fmt}
+          />
         </section>
 
         <div class="actions">
@@ -534,8 +589,30 @@
       <header class="page-head"><h1>Session Detail</h1><button on:click={() => go('/')}>Back</button></header>
       {#if selectedSession}
         <ActiveSummary detail={selectedSession} runningSeconds={selectedSession.session.duration_seconds} {duration} />
-        <ReadOnlyLines title="Loot" rows={selectedSession.loot} {fmt} />
-        <ReadOnlyLines title="Investments" rows={selectedSession.investments} {fmt} />
+        {#if selectedSession.session.status === 'completed' && !editingHistorical}
+          <section class="panel">
+            <h2>Historical session</h2>
+            <p class="muted">This session is completed. Unlocking it will change historical totals and reports.</p>
+            <button on:click={() => (editingHistorical = true)}>Unlock for editing</button>
+          </section>
+        {/if}
+
+        {#if editingHistorical}
+          <div class="notice danger">Historical editing is active. Saved changes will update this session's totals and reports.</div>
+          <section class="panel run-counter">
+            <label>Maps / runs<input type="number" min="0" bind:value={selectedSession.session.maps_run} on:change={(e) => setSelectedMaps(Number(e.currentTarget.value))} /></label>
+          </section>
+          <EditableLoot title="Currency loot" rows={selectedSession.loot.filter((l) => l.item_type === 'currency')} updateLoot={updateSelectedLoot} />
+          <EditableLoot title="Chase items" rows={selectedSession.loot.filter((l) => l.item_type === 'chase')} updateLoot={updateSelectedLoot} divineRate={selectedSession.session.divine_value_exalts_snapshot} />
+          <EditableLoot title="Custom loot" rows={selectedSession.loot.filter((l) => l.item_type === 'custom')} updateLoot={updateSelectedLoot} />
+          <section class="panel">
+            <h2>Investments</h2>
+            <EditableInvestment rows={selectedSession.investments} updateInvestment={updateSelectedInvestment} {fmt} />
+          </section>
+        {:else}
+          <ReadOnlyLines title="Loot" rows={selectedSession.loot} {fmt} />
+          <ReadOnlyLines title="Investments" rows={selectedSession.investments} {fmt} />
+        {/if}
       {/if}
     {:else if path === '/prices'}
       <header class="page-head"><h1>Price Settings</h1></header>
@@ -578,8 +655,14 @@
             <label>Mechanic<select bind:value={strategyForm.mechanic_id}><option value={null}>None</option>{#each mechanics as m}<option value={m.id}>{m.name}</option>{/each}</select></label>
             <label>Description<textarea bind:value={strategyForm.description}></textarea></label>
             <label>Default notes<textarea bind:value={strategyForm.default_notes}></textarea></label>
-            <label>Default investments JSON<textarea bind:value={strategyForm.default_investment_rows}></textarea></label>
-            <label>Default chase JSON<textarea bind:value={strategyForm.default_chase_items}></textarea></label>
+            <div class="span-2 field-block">
+              <span>Default investments</span>
+              <DefaultInvestmentEditor bind:value={strategyForm.default_investment_rows} />
+            </div>
+            <div class="span-2 field-block">
+              <span>Default chase items</span>
+              <DefaultChaseSelector bind:value={strategyForm.default_chase_items} {chaseItems} />
+            </div>
             <button on:click={saveStrategy}>{strategyForm.id ? 'Update' : 'Create'} Strategy</button>
           </div>
         </section>

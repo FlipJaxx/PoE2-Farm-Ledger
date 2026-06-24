@@ -30,6 +30,8 @@ const tauriApi = {
   updateLoot: (input: Record<string, unknown>) => invoke<SessionDetail>('add_or_update_session_loot', { input }),
   updateInvestment: (input: Record<string, unknown>) =>
     invoke<SessionDetail>('add_or_update_session_investment', { input }),
+  deleteLootLine: (lineId: number) => invoke<SessionDetail>('delete_session_loot_line', { lineId }),
+  deleteInvestmentLine: (lineId: number) => invoke<SessionDetail>('delete_session_investment_line', { lineId }),
   stopSession: (sessionId: number) => invoke<FarmSession>('stop_session', { sessionId }),
   cancelSession: (sessionId: number) => invoke<FarmSession>('cancel_session', { sessionId }),
   updateCurrencyValue: (id: number, valueInExalts: number) =>
@@ -227,6 +229,28 @@ function defaultInvestmentLines(strategy: Strategy | undefined, sessionId: numbe
   }
 }
 
+function defaultChaseNames(strategy: Strategy | undefined): Set<string> {
+  if (!strategy) return new Set();
+  try {
+    const rows = JSON.parse(strategy.default_chase_items) as Array<unknown>;
+    if (!Array.isArray(rows)) return new Set();
+    return new Set(
+      rows
+        .map((row) => {
+          if (typeof row === 'string') return row.trim();
+          if (row && typeof row === 'object') {
+            const objectRow = row as Record<string, unknown>;
+            return String(objectRow.name || objectRow.item_name || '').trim();
+          }
+          return '';
+        })
+        .filter(Boolean)
+    );
+  } catch {
+    return new Set();
+  }
+}
+
 function recalculate(store: Store, sessionId: number) {
   const session = store.sessions.find((row) => row.id === sessionId);
   const detail = store.details[sessionId];
@@ -288,9 +312,8 @@ function reportsFor(store: Store, key: 'mechanic_name' | 'strategy_name', limit 
       report.total_time_seconds = rows.reduce((sum, row) => sum + row.duration_seconds, 0);
       report.total_net_profit = rows.reduce((sum, row) => sum + row.net_profit_exalts, 0);
       report.average_profit_per_hour =
-        rows.reduce((sum, row) => sum + row.profit_per_hour_exalts, 0) / Math.max(1, rows.length);
-      report.average_profit_per_map =
-        rows.reduce((sum, row) => sum + row.profit_per_map_exalts, 0) / Math.max(1, rows.length);
+        report.total_time_seconds > 0 ? report.total_net_profit / (report.total_time_seconds / 3600) : 0;
+      report.average_profit_per_map = report.total_maps > 0 ? report.total_net_profit / report.total_maps : 0;
       report.best_session_profit = Math.max(...rows.map((row) => row.net_profit_exalts));
       report.worst_session_profit = Math.min(...rows.map((row) => row.net_profit_exalts));
       return report;
@@ -365,6 +388,11 @@ function createBrowserApi() {
       const id = nextId(store);
       const strategyId = Number(input.strategy_id) || null;
       const strategy = strategyId ? store.strategies.find((row) => row.id === strategyId) : undefined;
+      const chaseNames = defaultChaseNames(strategy);
+      const activeCurrencies = store.currencies.filter((row) => row.active);
+      const activeChaseItems = store.chaseItems.filter((row) => row.active);
+      const seededChaseItems =
+        chaseNames.size > 0 ? activeChaseItems.filter((row) => chaseNames.has(row.name)) : activeChaseItems;
       const session: FarmSession = {
         id,
         strategy_id: strategyId,
@@ -392,7 +420,7 @@ function createBrowserApi() {
       store.sessions.unshift(session);
       store.details[id] = {
         loot: [
-          ...store.currencies.map((row) => ({
+          ...activeCurrencies.map((row) => ({
             id: nextId(store),
             session_id: id,
             item_type: 'currency',
@@ -402,7 +430,7 @@ function createBrowserApi() {
             value_in_exalts_snapshot: row.value_in_exalts,
             total_value_exalts: 0
           })),
-          ...store.chaseItems.map((row) => ({
+          ...seededChaseItems.map((row) => ({
             id: nextId(store),
             session_id: id,
             item_type: 'chase',
@@ -431,6 +459,8 @@ function createBrowserApi() {
     updateLoot: async (input: Record<string, unknown>) => {
       const store = loadStore();
       const sessionId = Number(input.session_id);
+      const session = store.sessions.find((row) => row.id === sessionId);
+      if (!session || (session.status !== 'running' && session.status !== 'completed')) throw new Error('Session cannot be edited');
       const lines = store.details[sessionId].loot;
       const itemName = String(input.item_name || '');
       const itemType = String(input.item_type || 'custom');
@@ -456,6 +486,8 @@ function createBrowserApi() {
     updateInvestment: async (input: Record<string, unknown>) => {
       const store = loadStore();
       const sessionId = Number(input.session_id);
+      const session = store.sessions.find((row) => row.id === sessionId);
+      if (!session || (session.status !== 'running' && session.status !== 'completed')) throw new Error('Session cannot be edited');
       const lines = store.details[sessionId].investments;
       const itemName = String(input.item_name || '');
       const investmentType = String(input.investment_type || 'Misc');
@@ -474,6 +506,34 @@ function createBrowserApi() {
       line.count = Math.max(0, Number(input.count) || 0);
       line.value_in_exalts_snapshot = Math.max(0, Number(input.value_in_exalts) || 0);
       line.total_value_exalts = lineTotal(line.count, line.value_in_exalts_snapshot);
+      recalculate(store, sessionId);
+      saveStore(store);
+      return sessionDetail(store, sessionId);
+    },
+    deleteLootLine: async (lineId: number) => {
+      const store = loadStore();
+      const sessionId = Number(Object.keys(store.details).find((id) => store.details[Number(id)].loot.some((line) => line.id === lineId)));
+      const session = store.sessions.find((row) => row.id === sessionId);
+      if (!session || session.status !== 'running') throw new Error('Only running session lines can be removed');
+      const lines = store.details[sessionId].loot;
+      const line = lines.find((row) => row.id === lineId);
+      if (!line) throw new Error('Loot line not found');
+      if (line.item_type === 'custom') {
+        store.details[sessionId].loot = lines.filter((row) => row.id !== lineId);
+      } else {
+        line.count = 0;
+        line.total_value_exalts = 0;
+      }
+      recalculate(store, sessionId);
+      saveStore(store);
+      return sessionDetail(store, sessionId);
+    },
+    deleteInvestmentLine: async (lineId: number) => {
+      const store = loadStore();
+      const sessionId = Number(Object.keys(store.details).find((id) => store.details[Number(id)].investments.some((line) => line.id === lineId)));
+      const session = store.sessions.find((row) => row.id === sessionId);
+      if (!session || session.status !== 'running') throw new Error('Only running session lines can be removed');
+      store.details[sessionId].investments = store.details[sessionId].investments.filter((line) => line.id !== lineId);
       recalculate(store, sessionId);
       saveStore(store);
       return sessionDetail(store, sessionId);

@@ -20,6 +20,8 @@ pub fn run() {
             commands::update_session_maps,
             commands::add_or_update_session_loot,
             commands::add_or_update_session_investment,
+            commands::delete_session_loot_line,
+            commands::delete_session_investment_line,
             commands::stop_session,
             commands::cancel_session,
             commands::list_sessions,

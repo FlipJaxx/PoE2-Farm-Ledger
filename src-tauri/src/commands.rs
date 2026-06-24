@@ -18,6 +18,16 @@ struct DefaultInvestmentRow {
     value_in_exalts: f64,
 }
 
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum DefaultChaseItem {
+    Name(String),
+    Row {
+        name: Option<String>,
+        item_name: Option<String>,
+    },
+}
+
 fn current_divine_rate(conn: &Connection) -> f64 {
     conn.query_row(
         "SELECT value_in_exalts FROM currencies WHERE name = 'Divine Orb'",
@@ -116,10 +126,10 @@ pub fn create_session(
     )
     .map_err(|err| err.to_string())?;
     let id = conn.last_insert_rowid();
-    seed_session_price_rows(&conn, id, divine_value)?;
+    seed_session_price_rows(&conn, id, divine_value, input.strategy_id)?;
     if let Some(strategy_id) = input.strategy_id {
         apply_strategy_defaults(&conn, id, strategy_id)?;
-        refresh_running_totals(&conn, id)?;
+        refresh_session_totals(&conn, id)?;
     }
     get_session_row(&conn, id)
 }
@@ -146,12 +156,13 @@ pub fn update_session_maps(
     maps_run: i64,
 ) -> Result<FarmSession, String> {
     let conn = state.connection()?;
+    ensure_session_editable(&conn, session_id)?;
     conn.execute(
-        "UPDATE farm_sessions SET maps_run = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2 AND status = 'running'",
+        "UPDATE farm_sessions SET maps_run = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2",
         params![maps_run.max(0), session_id],
     )
     .map_err(|err| err.to_string())?;
-    refresh_running_totals(&conn, session_id)?;
+    refresh_session_totals(&conn, session_id)?;
     get_session_row(&conn, session_id)
 }
 
@@ -161,6 +172,7 @@ pub fn add_or_update_session_loot(
     input: SessionLootRequest,
 ) -> Result<SessionDetail, String> {
     let conn = state.connection()?;
+    ensure_session_editable(&conn, input.session_id)?;
     let total = line_total(input.count, input.value_in_exalts);
     conn.execute(
         "INSERT INTO session_loot (session_id, item_type, item_name, count, value_in_exalts_snapshot, total_value_exalts)
@@ -171,7 +183,7 @@ pub fn add_or_update_session_loot(
         params![input.session_id, input.item_type, input.item_name, input.count.max(0.0), input.value_in_exalts.max(0.0), total],
     )
     .map_err(|err| err.to_string())?;
-    refresh_running_totals(&conn, input.session_id)?;
+    refresh_session_totals(&conn, input.session_id)?;
     session_detail(&conn, input.session_id)
 }
 
@@ -181,6 +193,7 @@ pub fn add_or_update_session_investment(
     input: SessionInvestmentRequest,
 ) -> Result<SessionDetail, String> {
     let conn = state.connection()?;
+    ensure_session_editable(&conn, input.session_id)?;
     let total = line_total(input.count, input.value_in_exalts);
     conn.execute(
         "INSERT INTO session_investments (session_id, investment_type, item_name, count, value_in_exalts_snapshot, total_value_exalts)
@@ -191,8 +204,28 @@ pub fn add_or_update_session_investment(
         params![input.session_id, input.investment_type, input.item_name, input.count.max(0.0), input.value_in_exalts.max(0.0), total],
     )
     .map_err(|err| err.to_string())?;
-    refresh_running_totals(&conn, input.session_id)?;
+    refresh_session_totals(&conn, input.session_id)?;
     session_detail(&conn, input.session_id)
+}
+
+#[tauri::command]
+pub fn delete_session_loot_line(
+    state: State<'_, AppState>,
+    line_id: i64,
+) -> Result<SessionDetail, String> {
+    let conn = state.connection()?;
+    let session_id = delete_session_loot_line_query(&conn, line_id)?;
+    session_detail(&conn, session_id)
+}
+
+#[tauri::command]
+pub fn delete_session_investment_line(
+    state: State<'_, AppState>,
+    line_id: i64,
+) -> Result<SessionDetail, String> {
+    let conn = state.connection()?;
+    let session_id = delete_session_investment_line_query(&conn, line_id)?;
+    session_detail(&conn, session_id)
 }
 
 #[tauri::command]
@@ -563,7 +596,12 @@ pub fn get_reports_data(state: State<'_, AppState>) -> Result<ReportsData, Strin
     })
 }
 
-fn seed_session_price_rows(conn: &Connection, session_id: i64, divine_rate: f64) -> Result<(), String> {
+fn seed_session_price_rows(
+    conn: &Connection,
+    session_id: i64,
+    divine_rate: f64,
+    strategy_id: Option<i64>,
+) -> Result<(), String> {
     {
         let mut stmt = conn
             .prepare("SELECT name, value_in_exalts FROM currencies WHERE active = 1 ORDER BY display_order, name")
@@ -583,18 +621,46 @@ fn seed_session_price_rows(conn: &Connection, session_id: i64, divine_rate: f64)
             .map_err(|err| err.to_string())?;
         }
     }
-    let mut stmt = conn
-        .prepare(
-            "SELECT name, default_value_in_divines FROM chase_items WHERE active = 1 ORDER BY name",
+    let default_chase_names = strategy_id
+        .map(|id| strategy_default_chase_names(conn, id))
+        .transpose()?
+        .unwrap_or_default();
+    let (sql, bind_names) = if default_chase_names.is_empty() {
+        (
+            "SELECT name, default_value_in_divines FROM chase_items WHERE active = 1 ORDER BY name"
+                .to_string(),
+            false,
         )
-        .map_err(|err| err.to_string())?;
-    let rows = stmt
-        .query_map([], |row| {
+    } else {
+        let placeholders = (1..=default_chase_names.len())
+            .map(|index| format!("?{index}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        (
+            format!(
+                "SELECT name, default_value_in_divines FROM chase_items
+                 WHERE active = 1 AND name IN ({placeholders}) ORDER BY name"
+            ),
+            true,
+        )
+    };
+    let mut stmt = conn.prepare(&sql).map_err(|err| err.to_string())?;
+    let rows: Vec<(String, f64)> = if bind_names {
+        stmt.query_map(rusqlite::params_from_iter(default_chase_names.iter()), |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
         })
-        .map_err(|err| err.to_string())?;
-    for row in rows {
-        let (name, value_in_divines) = row.map_err(|err| err.to_string())?;
+        .map_err(|err| err.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|err| err.to_string())?
+    } else {
+        stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
+        })
+        .map_err(|err| err.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|err| err.to_string())?
+    };
+    for (name, value_in_divines) in rows {
         let value_in_exalts = value_in_divines.max(0.0) * divine_rate.max(0.0);
         conn.execute(
             "INSERT INTO session_loot (session_id, item_type, item_name, count, value_in_exalts_snapshot, total_value_exalts)
@@ -604,6 +670,32 @@ fn seed_session_price_rows(conn: &Connection, session_id: i64, divine_rate: f64)
         .map_err(|err| err.to_string())?;
     }
     Ok(())
+}
+
+fn strategy_default_chase_names(conn: &Connection, strategy_id: i64) -> Result<Vec<String>, String> {
+    let raw = conn
+        .query_row(
+            "SELECT default_chase_items FROM strategies WHERE id = ?1",
+            params![strategy_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|err| err.to_string())?
+        .unwrap_or_else(|| "[]".to_string());
+
+    let Ok(items) = serde_json::from_str::<Vec<DefaultChaseItem>>(&raw) else {
+        return Ok(Vec::new());
+    };
+
+    Ok(items
+        .into_iter()
+        .filter_map(|item| match item {
+            DefaultChaseItem::Name(name) => Some(name),
+            DefaultChaseItem::Row { name, item_name } => name.or(item_name),
+        })
+        .map(|name| name.trim().to_string())
+        .filter(|name| !name.is_empty())
+        .collect())
 }
 
 fn apply_strategy_defaults(
@@ -663,16 +755,38 @@ fn apply_strategy_defaults(
     Ok(())
 }
 
-fn refresh_running_totals(conn: &Connection, session_id: i64) -> Result<(), String> {
+fn ensure_session_editable(conn: &Connection, session_id: i64) -> Result<(), String> {
     let session = get_session_row(conn, session_id)?;
-    if session.status != "running" {
+    if session.status == "running" || session.status == "completed" {
+        Ok(())
+    } else {
+        Err("Only running or completed sessions can be edited".to_string())
+    }
+}
+
+fn ensure_running_session(conn: &Connection, session_id: i64) -> Result<(), String> {
+    let session = get_session_row(conn, session_id)?;
+    if session.status == "running" {
+        Ok(())
+    } else {
+        Err("Only running session lines can be removed".to_string())
+    }
+}
+
+fn refresh_session_totals(conn: &Connection, session_id: i64) -> Result<(), String> {
+    let session = get_session_row(conn, session_id)?;
+    if session.status != "running" && session.status != "completed" {
         return Ok(());
     }
     let (loot, investment) = session_line_sums(conn, session_id)?;
-    let started_at = chrono::DateTime::parse_from_rfc3339(&session.started_at)
-        .map_err(|err| err.to_string())?
-        .with_timezone(&Utc);
-    let duration_seconds = (Utc::now() - started_at).num_seconds().max(0);
+    let duration_seconds = if session.status == "running" {
+        let started_at = chrono::DateTime::parse_from_rfc3339(&session.started_at)
+            .map_err(|err| err.to_string())?
+            .with_timezone(&Utc);
+        (Utc::now() - started_at).num_seconds().max(0)
+    } else {
+        session.duration_seconds.max(0)
+    };
     let totals = session_totals(
         loot,
         investment,
@@ -699,6 +813,48 @@ fn refresh_running_totals(conn: &Connection, session_id: i64) -> Result<(), Stri
     )
     .map_err(|err| err.to_string())?;
     Ok(())
+}
+
+fn delete_session_loot_line_query(conn: &Connection, line_id: i64) -> Result<i64, String> {
+    let (session_id, item_type): (i64, String) = conn
+        .query_row(
+            "SELECT session_id, item_type FROM session_loot WHERE id = ?1",
+            params![line_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|err| err.to_string())?;
+    ensure_running_session(conn, session_id)?;
+    if item_type == "custom" {
+        conn.execute("DELETE FROM session_loot WHERE id = ?1", params![line_id])
+            .map_err(|err| err.to_string())?;
+    } else {
+        conn.execute(
+            "UPDATE session_loot SET count = 0, total_value_exalts = 0,
+             updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
+            params![line_id],
+        )
+        .map_err(|err| err.to_string())?;
+    }
+    refresh_session_totals(conn, session_id)?;
+    Ok(session_id)
+}
+
+fn delete_session_investment_line_query(conn: &Connection, line_id: i64) -> Result<i64, String> {
+    let session_id: i64 = conn
+        .query_row(
+            "SELECT session_id FROM session_investments WHERE id = ?1",
+            params![line_id],
+            |row| row.get(0),
+        )
+        .map_err(|err| err.to_string())?;
+    ensure_running_session(conn, session_id)?;
+    conn.execute(
+        "DELETE FROM session_investments WHERE id = ?1",
+        params![line_id],
+    )
+    .map_err(|err| err.to_string())?;
+    refresh_session_totals(conn, session_id)?;
+    Ok(session_id)
 }
 
 fn session_line_sums(conn: &Connection, session_id: i64) -> Result<(f64, f64), String> {
@@ -818,12 +974,17 @@ fn report_query(
     limit: i64,
 ) -> Result<Vec<ReportRow>, String> {
     let sql = format!(
-        "SELECT {group_column}, COUNT(*), COALESCE(AVG(profit_per_hour_exalts),0),
-         COALESCE(AVG(profit_per_map_exalts),0), COALESCE(SUM(maps_run),0),
-         COALESCE(SUM(duration_seconds),0), COALESCE(SUM(net_profit_exalts),0),
+        "SELECT {group_column}, COUNT(*),
+         CASE WHEN COALESCE(SUM(duration_seconds),0) > 0
+              THEN COALESCE(SUM(net_profit_exalts),0) / (SUM(duration_seconds) / 3600.0)
+              ELSE 0 END,
+         CASE WHEN COALESCE(SUM(maps_run),0) > 0
+              THEN COALESCE(SUM(net_profit_exalts),0) / SUM(maps_run)
+              ELSE 0 END,
+         COALESCE(SUM(maps_run),0), COALESCE(SUM(duration_seconds),0), COALESCE(SUM(net_profit_exalts),0),
          COALESCE(MAX(net_profit_exalts),0), COALESCE(MIN(net_profit_exalts),0)
          FROM farm_sessions WHERE status = 'completed'
-         GROUP BY {group_column} ORDER BY AVG(profit_per_hour_exalts) DESC LIMIT ?1"
+         GROUP BY {group_column} ORDER BY 3 DESC LIMIT ?1"
     );
     let mut stmt = conn.prepare(&sql).map_err(|err| err.to_string())?;
     stmt.query_map(params![limit], |row| {
@@ -941,4 +1102,165 @@ fn strategy_from_row(row: &rusqlite::Row) -> rusqlite::Result<Strategy> {
         default_chase_items: row.get(7)?,
         active: row.get::<_, i64>(8)? == 1,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::schema::migrate_and_seed;
+
+    fn test_conn() -> Connection {
+        let conn = Connection::open_in_memory().expect("open in-memory database");
+        migrate_and_seed(&conn).expect("migrate database");
+        conn
+    }
+
+    fn insert_session(
+        conn: &Connection,
+        status: &str,
+        strategy_name: &str,
+        duration_seconds: i64,
+        maps_run: i64,
+        net_profit_exalts: f64,
+    ) -> i64 {
+        conn.execute(
+            "INSERT INTO farm_sessions
+             (strategy_name, mechanic_name, status, started_at, ended_at, duration_seconds, maps_run,
+              total_loot_value_exalts, total_investment_value_exalts, net_profit_exalts,
+              profit_per_hour_exalts, profit_per_map_exalts, maps_per_hour, divine_per_hour)
+             VALUES (?1, 'Test Mechanic', ?2, '2026-01-01T00:00:00Z', '2026-01-01T01:00:00Z',
+              ?3, ?4, ?5, 0, ?5, 0, 0, 0, 0)",
+            params![strategy_name, status, duration_seconds, maps_run, net_profit_exalts],
+        )
+        .expect("insert session");
+        conn.last_insert_rowid()
+    }
+
+    #[test]
+    fn reports_use_weighted_profit_rates() {
+        let conn = test_conn();
+        insert_session(&conn, "completed", "Weighted", 3600, 10, 100.0);
+        insert_session(&conn, "completed", "Weighted", 7200, 30, 500.0);
+
+        let reports = report_query(&conn, "strategy_name", 10).expect("reports");
+        let report = reports
+            .iter()
+            .find(|row| row.group_name == "Weighted")
+            .expect("weighted row");
+
+        assert_eq!(report.sessions, 2);
+        assert_eq!(report.total_time_seconds, 10800);
+        assert_eq!(report.total_maps, 40);
+        assert_eq!(report.total_net_profit, 600.0);
+        assert_eq!(report.average_profit_per_hour, 200.0);
+        assert_eq!(report.average_profit_per_map, 15.0);
+    }
+
+    #[test]
+    fn completed_session_recalculation_preserves_duration() {
+        let conn = test_conn();
+        let session_id = insert_session(&conn, "completed", "Completed", 3600, 4, 0.0);
+        conn.execute(
+            "INSERT INTO session_loot
+             (session_id, item_type, item_name, count, value_in_exalts_snapshot, total_value_exalts)
+             VALUES (?1, 'custom', 'Rare drop', 2, 50, 100)",
+            params![session_id],
+        )
+        .expect("insert loot");
+        conn.execute(
+            "INSERT INTO session_investments
+             (session_id, investment_type, item_name, count, value_in_exalts_snapshot, total_value_exalts)
+             VALUES (?1, 'Maps', 'Waystone', 1, 20, 20)",
+            params![session_id],
+        )
+        .expect("insert investment");
+
+        refresh_session_totals(&conn, session_id).expect("refresh totals");
+        let session = get_session_row(&conn, session_id).expect("session");
+
+        assert_eq!(session.duration_seconds, 3600);
+        assert_eq!(session.total_loot_value_exalts, 100.0);
+        assert_eq!(session.total_investment_value_exalts, 20.0);
+        assert_eq!(session.net_profit_exalts, 80.0);
+        assert_eq!(session.profit_per_hour_exalts, 80.0);
+        assert_eq!(session.profit_per_map_exalts, 20.0);
+    }
+
+    #[test]
+    fn deleting_running_lines_removes_custom_and_zeros_seeded_loot() {
+        let conn = test_conn();
+        let session_id = insert_session(&conn, "running", "Running", 0, 1, 0.0);
+        conn.execute(
+            "INSERT INTO session_loot
+             (session_id, item_type, item_name, count, value_in_exalts_snapshot, total_value_exalts)
+             VALUES (?1, 'custom', 'Custom item', 1, 10, 10)",
+            params![session_id],
+        )
+        .expect("insert custom loot");
+        let custom_id = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO session_loot
+             (session_id, item_type, item_name, count, value_in_exalts_snapshot, total_value_exalts)
+             VALUES (?1, 'currency', 'Exalted Orb', 5, 1, 5)",
+            params![session_id],
+        )
+        .expect("insert seeded loot");
+        let seeded_id = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO session_investments
+             (session_id, investment_type, item_name, count, value_in_exalts_snapshot, total_value_exalts)
+             VALUES (?1, 'Maps', 'Waystone', 1, 3, 3)",
+            params![session_id],
+        )
+        .expect("insert investment");
+        let investment_id = conn.last_insert_rowid();
+
+        delete_session_loot_line_query(&conn, custom_id).expect("delete custom");
+        delete_session_loot_line_query(&conn, seeded_id).expect("zero seeded");
+        delete_session_investment_line_query(&conn, investment_id).expect("delete investment");
+
+        let custom_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM session_loot WHERE id = ?1",
+                params![custom_id],
+                |row| row.get(0),
+            )
+            .expect("custom count");
+        let (seeded_count, seeded_total): (f64, f64) = conn
+            .query_row(
+                "SELECT count, total_value_exalts FROM session_loot WHERE id = ?1",
+                params![seeded_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("seeded row");
+        let investment_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM session_investments WHERE id = ?1",
+                params![investment_id],
+                |row| row.get(0),
+            )
+            .expect("investment count");
+
+        assert_eq!(custom_count, 0);
+        assert_eq!(seeded_count, 0.0);
+        assert_eq!(seeded_total, 0.0);
+        assert_eq!(investment_count, 0);
+    }
+
+    #[test]
+    fn deleting_completed_lines_is_rejected() {
+        let conn = test_conn();
+        let session_id = insert_session(&conn, "completed", "Completed", 3600, 1, 0.0);
+        conn.execute(
+            "INSERT INTO session_loot
+             (session_id, item_type, item_name, count, value_in_exalts_snapshot, total_value_exalts)
+             VALUES (?1, 'custom', 'Custom item', 1, 10, 10)",
+            params![session_id],
+        )
+        .expect("insert loot");
+        let line_id = conn.last_insert_rowid();
+
+        let err = delete_session_loot_line_query(&conn, line_id).expect_err("delete rejected");
+        assert_eq!(err, "Only running session lines can be removed");
+    }
 }
