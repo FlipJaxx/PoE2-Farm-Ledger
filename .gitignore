@@ -1,6 +1,7 @@
 node_modules
 dist
 .tools
+.auth
 src-tauri/target
 src-tauri/gen
 *.sqlite
