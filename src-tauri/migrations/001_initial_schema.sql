@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS chase_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
     default_value_in_exalts REAL NOT NULL,
+    default_value_in_divines REAL NOT NULL DEFAULT 0,
     notes TEXT NOT NULL DEFAULT '',
     active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,

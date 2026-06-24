@@ -21,6 +21,7 @@ pub fn migrate_and_seed(conn: &Connection) -> Result<()> {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL UNIQUE,
             default_value_in_exalts REAL NOT NULL,
+            default_value_in_divines REAL NOT NULL DEFAULT 0,
             notes TEXT NOT NULL DEFAULT '',
             active INTEGER NOT NULL DEFAULT 1,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -118,6 +119,7 @@ pub fn migrate_and_seed(conn: &Connection) -> Result<()> {
 
     ensure_currency_order_column(conn)?;
     seed_currencies(conn)?;
+    ensure_chase_divines_column(conn)?;
     seed_chase_items(conn)?;
     seed_mechanics(conn)?;
     Ok(())
@@ -141,6 +143,35 @@ fn ensure_currency_order_column(conn: &Connection) -> Result<()> {
         conn.execute(
             "ALTER TABLE currencies ADD COLUMN display_order INTEGER NOT NULL DEFAULT 0",
             [],
+        )?;
+    }
+    Ok(())
+}
+
+fn ensure_chase_divines_column(conn: &Connection) -> Result<()> {
+    let has_divines = {
+        let mut stmt = conn.prepare("PRAGMA table_info(chase_items)")?;
+        let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
+        let mut found = false;
+        for column in columns {
+            if column? == "default_value_in_divines" {
+                found = true;
+                break;
+            }
+        }
+        found
+    };
+
+    if !has_divines {
+        conn.execute(
+            "ALTER TABLE chase_items ADD COLUMN default_value_in_divines REAL NOT NULL DEFAULT 0",
+            [],
+        )?;
+        let divine_rate = current_divine_rate(conn);
+        conn.execute(
+            "UPDATE chase_items SET default_value_in_divines = default_value_in_exalts / ?1
+             WHERE default_value_in_divines = 0 AND default_value_in_exalts > 0",
+            params![divine_rate],
         )?;
     }
     Ok(())
@@ -172,21 +203,34 @@ fn seed_currencies(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+fn current_divine_rate(conn: &Connection) -> f64 {
+    conn.query_row(
+        "SELECT value_in_exalts FROM currencies WHERE name = 'Divine Orb'",
+        [],
+        |row| row.get(0),
+    )
+    .unwrap_or(350.0)
+}
+
 fn seed_chase_items(conn: &Connection) -> Result<()> {
     let items = [
-        ("Aldur's Saga", 350.0),
-        ("Aldur's Legacy", 1000.0),
-        ("Mageblood", 12000.0),
-        ("Headhunter", 8000.0),
-        ("Temporalis", 20000.0),
-        ("Ingenuity", 2000.0),
-        ("Against the Darkness", 5000.0),
+        ("Aldur's Saga", 3.0),
+        ("Aldur's Legacy", 8.0),
+        ("Mageblood", 100.0),
+        ("Headhunter", 340.0),
+        ("Temporalis", 170.0),
+        ("Ingenuity", 18.0),
+        ("Against the Darkness", 40.0),
     ];
 
-    for (name, value) in items {
+    let divine_rate = current_divine_rate(conn);
+    for (name, value_in_divines) in items {
+        let value_in_exalts = value_in_divines * divine_rate;
         conn.execute(
-            "INSERT OR IGNORE INTO chase_items (name, default_value_in_exalts, notes) VALUES (?1, ?2, '')",
-            params![name, value],
+            "INSERT OR IGNORE INTO chase_items
+             (name, default_value_in_exalts, default_value_in_divines, notes)
+             VALUES (?1, ?2, ?3, '')",
+            params![name, value_in_exalts, value_in_divines],
         )?;
     }
     Ok(())

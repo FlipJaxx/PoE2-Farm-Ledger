@@ -1,6 +1,7 @@
 <script lang="ts">
   export let rows: Array<{ id: number; name: string; [key: string]: unknown }>;
   export let valueKey: string;
+  export let unitLabel = 'exalts';
   export let save: (row: any) => Promise<void>;
   export let move: ((row: any, direction: -1 | 1) => Promise<void>) | null = null;
 
@@ -12,7 +13,7 @@
 
 <table>
   <thead>
-    <tr><th>Name</th><th>Value in exalts</th>{#if move}<th>Order</th>{/if}</tr>
+    <tr><th>Name</th><th>Value in {unitLabel}</th>{#if move}<th>Order</th>{/if}</tr>
   </thead>
   <tbody>
     {#if rows.length === 0}

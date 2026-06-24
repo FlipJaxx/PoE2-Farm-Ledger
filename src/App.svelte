@@ -49,7 +49,7 @@
   let customLoot = { item_type: 'custom', item_name: '', count: 1, value_in_exalts: 0 };
   let investment = { investment_type: 'Maps', item_name: '', count: 1, value_in_exalts: 0 };
   let newCurrency = { name: '', short_name: '', value_in_exalts: 0 };
-  let newChase = { name: '', value_in_exalts: 0, notes: '' };
+  let newChase = { name: '', value_in_divines: 0, notes: '' };
   let newMechanic = { name: '', description: '' };
   let strategyForm = {
     id: 0,
@@ -247,7 +247,7 @@
   }
 
   async function saveChase(item: ChaseItem) {
-    await api.updateChaseItemValue(item.id, Number(item.default_value_in_exalts) || 0);
+    await api.updateChaseItemValue(item.id, Number(item.default_value_in_divines) || 0);
   }
 
   async function addCurrency() {
@@ -273,8 +273,8 @@
     }
     try {
       error = '';
-      await api.createChaseItem(newChase.name, newChase.value_in_exalts, newChase.notes);
-      newChase = { name: '', value_in_exalts: 0, notes: '' };
+      await api.createChaseItem(newChase.name, newChase.value_in_divines, newChase.notes);
+      newChase = { name: '', value_in_divines: 0, notes: '' };
       [currencies, chaseItems] = await Promise.all([api.currencies(), api.chaseItems()]);
     } catch (err) {
       error = String(err);
@@ -428,8 +428,8 @@
           <button on:click={() => changeMaps(1)}>+1</button>
         </section>
 
-        <EditableLoot title="Currency loot" rows={active.loot.filter((l) => l.item_type === 'currency')} {updateLoot} {fmt} />
-        <EditableLoot title="Chase items" rows={active.loot.filter((l) => l.item_type === 'chase')} {updateLoot} {fmt} />
+        <EditableLoot title="Currency loot" rows={active.loot.filter((l) => l.item_type === 'currency')} {updateLoot} />
+        <EditableLoot title="Chase items" rows={active.loot.filter((l) => l.item_type === 'chase')} {updateLoot} divineRate={active.session.divine_value_exalts_snapshot} />
 
         <section class="panel">
           <h2>Custom loot</h2>
@@ -440,7 +440,7 @@
             <input type="number" min="0" step="0.01" bind:value={customLoot.value_in_exalts} />
             <button on:click={addCustomLoot}>Add</button>
           </div>
-          <EditableLoot title="Logged custom loot" rows={active.loot.filter((l) => l.item_type === 'custom')} {updateLoot} {fmt} embedded />
+          <EditableLoot title="Logged custom loot" rows={active.loot.filter((l) => l.item_type === 'custom')} {updateLoot} embedded />
         </section>
 
         <section class="panel">
@@ -482,10 +482,10 @@
         </section>
         <section class="panel">
           <h2>Chase Items</h2>
-          <PriceTable rows={chaseItems} valueKey="default_value_in_exalts" save={saveChase} />
+          <PriceTable rows={chaseItems} valueKey="default_value_in_divines" unitLabel="divines" save={saveChase} />
           <div class="inline-form">
             <input bind:value={newChase.name} placeholder="Item name" />
-            <input type="number" min="0" step="0.01" bind:value={newChase.value_in_exalts} />
+            <input type="number" min="0" step="0.01" bind:value={newChase.value_in_divines} placeholder="Value (div)" />
             <input bind:value={newChase.notes} placeholder="Notes" />
             <button on:click={addChase}>Add</button>
           </div>

@@ -27,6 +27,15 @@ fn map_unique(err: rusqlite::Error, message: &str) -> String {
     err.to_string()
 }
 
+fn current_divine_rate(conn: &Connection) -> f64 {
+    conn.query_row(
+        "SELECT value_in_exalts FROM currencies WHERE name = 'Divine Orb'",
+        [],
+        |row| row.get(0),
+    )
+    .unwrap_or(350.0)
+}
+
 #[tauri::command]
 pub fn initialize_database(app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
     state
@@ -116,7 +125,7 @@ pub fn create_session(
     )
     .map_err(|err| err.to_string())?;
     let id = conn.last_insert_rowid();
-    seed_session_price_rows(&conn, id)?;
+    seed_session_price_rows(&conn, id, divine_value)?;
     if let Some(strategy_id) = input.strategy_id {
         apply_strategy_defaults(&conn, id, strategy_id)?;
         refresh_running_totals(&conn, id)?;
@@ -345,7 +354,7 @@ pub fn create_custom_currency(
 pub fn list_chase_items(state: State<'_, AppState>) -> Result<Vec<ChaseItem>, String> {
     let conn = state.connection()?;
     let mut stmt = conn
-        .prepare("SELECT id, name, default_value_in_exalts, notes, active FROM chase_items ORDER BY name")
+        .prepare("SELECT id, name, default_value_in_exalts, default_value_in_divines, notes, active FROM chase_items ORDER BY name")
         .map_err(|err| err.to_string())?;
     stmt.query_map([], chase_from_row)
         .map_err(|err| err.to_string())?
@@ -357,7 +366,7 @@ pub fn list_chase_items(state: State<'_, AppState>) -> Result<Vec<ChaseItem>, St
 pub fn update_chase_item_value(
     state: State<'_, AppState>,
     id: i64,
-    value_in_exalts: f64,
+    value_in_divines: f64,
 ) -> Result<(), String> {
     let conn = state.connection()?;
     let name: String = conn
@@ -367,9 +376,11 @@ pub fn update_chase_item_value(
             |row| row.get(0),
         )
         .map_err(|err| err.to_string())?;
+    let value_in_divines = value_in_divines.max(0.0);
+    let value_in_exalts = value_in_divines * current_divine_rate(&conn);
     conn.execute(
-        "UPDATE chase_items SET default_value_in_exalts = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2",
-        params![value_in_exalts.max(0.0), id],
+        "UPDATE chase_items SET default_value_in_exalts = ?1, default_value_in_divines = ?2, updated_at = CURRENT_TIMESTAMP WHERE id = ?3",
+        params![value_in_exalts, value_in_divines, id],
     )
     .map_err(|err| err.to_string())?;
     insert_price_snapshot(&conn, &name, "chase", value_in_exalts)?;
@@ -380,7 +391,7 @@ pub fn update_chase_item_value(
 pub fn create_chase_item(
     state: State<'_, AppState>,
     name: String,
-    value_in_exalts: f64,
+    value_in_divines: f64,
     notes: String,
 ) -> Result<ChaseItem, String> {
     let conn = state.connection()?;
@@ -389,15 +400,17 @@ pub fn create_chase_item(
         return Err("Chase item name is required".to_string());
     }
 
+    let value_in_divines = value_in_divines.max(0.0);
+    let value_in_exalts = value_in_divines * current_divine_rate(&conn);
     conn.execute(
-        "INSERT INTO chase_items (name, default_value_in_exalts, notes) VALUES (?1, ?2, ?3)",
-        params![name, value_in_exalts.max(0.0), notes],
+        "INSERT INTO chase_items (name, default_value_in_exalts, default_value_in_divines, notes) VALUES (?1, ?2, ?3, ?4)",
+        params![name, value_in_exalts, value_in_divines, notes],
     )
     .map_err(|err| map_unique(err, "A chase item with that name already exists"))?;
     let id = conn.last_insert_rowid();
     insert_price_snapshot(&conn, name, "chase", value_in_exalts)?;
     conn.query_row(
-        "SELECT id, name, default_value_in_exalts, notes, active FROM chase_items WHERE id = ?1",
+        "SELECT id, name, default_value_in_exalts, default_value_in_divines, notes, active FROM chase_items WHERE id = ?1",
         params![id],
         chase_from_row,
     )
@@ -515,7 +528,7 @@ pub fn get_reports_data(state: State<'_, AppState>) -> Result<ReportsData, Strin
     })
 }
 
-fn seed_session_price_rows(conn: &Connection, session_id: i64) -> Result<(), String> {
+fn seed_session_price_rows(conn: &Connection, session_id: i64, divine_rate: f64) -> Result<(), String> {
     {
         let mut stmt = conn
             .prepare("SELECT name, value_in_exalts FROM currencies WHERE active = 1 ORDER BY display_order, name")
@@ -537,7 +550,7 @@ fn seed_session_price_rows(conn: &Connection, session_id: i64) -> Result<(), Str
     }
     let mut stmt = conn
         .prepare(
-            "SELECT name, default_value_in_exalts FROM chase_items WHERE active = 1 ORDER BY name",
+            "SELECT name, default_value_in_divines FROM chase_items WHERE active = 1 ORDER BY name",
         )
         .map_err(|err| err.to_string())?;
     let rows = stmt
@@ -546,11 +559,12 @@ fn seed_session_price_rows(conn: &Connection, session_id: i64) -> Result<(), Str
         })
         .map_err(|err| err.to_string())?;
     for row in rows {
-        let (name, value) = row.map_err(|err| err.to_string())?;
+        let (name, value_in_divines) = row.map_err(|err| err.to_string())?;
+        let value_in_exalts = value_in_divines.max(0.0) * divine_rate.max(0.0);
         conn.execute(
             "INSERT INTO session_loot (session_id, item_type, item_name, count, value_in_exalts_snapshot, total_value_exalts)
              VALUES (?1, 'chase', ?2, 0, ?3, 0)",
-            params![session_id, name, value],
+            params![session_id, name, value_in_exalts],
         )
         .map_err(|err| err.to_string())?;
     }
@@ -864,8 +878,9 @@ fn chase_from_row(row: &rusqlite::Row) -> rusqlite::Result<ChaseItem> {
         id: row.get(0)?,
         name: row.get(1)?,
         default_value_in_exalts: row.get(2)?,
-        notes: row.get(3)?,
-        active: row.get::<_, i64>(4)? == 1,
+        default_value_in_divines: row.get(3)?,
+        notes: row.get(4)?,
+        active: row.get::<_, i64>(5)? == 1,
     })
 }
 

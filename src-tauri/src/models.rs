@@ -16,6 +16,7 @@ pub struct ChaseItem {
     pub id: i64,
     pub name: String,
     pub default_value_in_exalts: f64,
+    pub default_value_in_divines: f64,
     pub notes: String,
     pub active: bool,
 }

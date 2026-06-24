@@ -37,10 +37,10 @@ const tauriApi = {
   updateCurrencyOrder: (currencyIds: number[]) => invoke<void>('update_currency_order', { currencyIds }),
   createCustomCurrency: (name: string, shortName: string, valueInExalts: number) =>
     invoke<Currency>('create_custom_currency', { name, shortName, valueInExalts }),
-  updateChaseItemValue: (id: number, valueInExalts: number) =>
-    invoke<void>('update_chase_item_value', { id, valueInExalts }),
-  createChaseItem: (name: string, valueInExalts: number, notes: string) =>
-    invoke<ChaseItem>('create_chase_item', { name, valueInExalts, notes }),
+  updateChaseItemValue: (id: number, valueInDivines: number) =>
+    invoke<void>('update_chase_item_value', { id, valueInDivines }),
+  createChaseItem: (name: string, valueInDivines: number, notes: string) =>
+    invoke<ChaseItem>('create_chase_item', { name, valueInDivines, notes }),
   createStrategy: (input: Record<string, unknown>) => invoke<Strategy>('create_strategy', { input }),
   updateStrategy: (input: Record<string, unknown>) => invoke<Strategy>('update_strategy', { input }),
   deleteStrategy: (id: number) => invoke<void>('delete_strategy', { id })
@@ -104,8 +104,8 @@ function initialStore(): Store {
     ],
     currencyOrderVersion: 1,
     chaseItems: [
-      { id: 10, name: 'Perfect Jeweller Orb', default_value_in_exalts: 18, notes: '', active: true },
-      { id: 11, name: 'Audience with the King', default_value_in_exalts: 75, notes: '', active: true }
+      { id: 10, name: 'Perfect Jeweller Orb', default_value_in_exalts: 18, default_value_in_divines: 0.05, notes: '', active: true },
+      { id: 11, name: 'Audience with the King', default_value_in_exalts: 75, default_value_in_divines: 0.2, notes: '', active: true }
     ],
     mechanics: [
       { id: 20, name: 'Generic Mapping', description: 'Manual mapping session', is_default: true, active: true },
@@ -174,6 +174,12 @@ function normalizeStore(store: Store): Store {
   store.currencyOrderVersion = 1;
   store.nextId = Math.max(store.nextId ?? 0, maxId);
   store.currencies.sort((a, b) => a.display_order - b.display_order || a.name.localeCompare(b.name));
+  const divineRate = divineRateForStore(store);
+  store.chaseItems = store.chaseItems.map((item) => ({
+    ...item,
+    default_value_in_divines:
+      item.default_value_in_divines ?? (divineRate > 0 ? item.default_value_in_exalts / divineRate : 0)
+  }));
   return store;
 }
 
@@ -184,6 +190,10 @@ function nextId(store: Store) {
 
 function lineTotal(count: number, value: number) {
   return Math.max(0, Number(count) || 0) * Math.max(0, Number(value) || 0);
+}
+
+function divineRateForStore(store: Store) {
+  return store.currencies.find((row) => row.name === 'Divine Orb')?.value_in_exalts ?? 350;
 }
 
 function defaultInvestmentLines(strategy: Strategy | undefined, sessionId: number, store: Store): SessionLine[] {
@@ -299,7 +309,7 @@ function createBrowserApi() {
       saveStore(store);
       const completed = store.sessions.filter((row) => row.status === 'completed');
       const totalProfit = completed.reduce((sum, row) => sum + row.net_profit_exalts, 0);
-      const divine = store.currencies.find((row) => row.name === 'Divine Orb')?.value_in_exalts ?? 120;
+      const divine = divineRateForStore(store);
       return {
         active_session: store.sessions.find((row) => row.status === 'running') ?? null,
         recent_sessions: store.sessions.slice(0, 6),
@@ -374,7 +384,7 @@ function createBrowserApi() {
         profit_per_hour_exalts: 0,
         profit_per_map_exalts: 0,
         maps_per_hour: 0,
-        divine_value_exalts_snapshot: store.currencies.find((row) => row.name === 'Divine Orb')?.value_in_exalts ?? 120,
+        divine_value_exalts_snapshot: divineRateForStore(store),
         divine_per_hour: 0
       };
       store.sessions.unshift(session);
@@ -397,7 +407,7 @@ function createBrowserApi() {
             investment_type: null,
             item_name: row.name,
             count: 0,
-            value_in_exalts_snapshot: row.default_value_in_exalts,
+            value_in_exalts_snapshot: row.default_value_in_divines * session.divine_value_exalts_snapshot,
             total_value_exalts: 0
           }))
         ],
@@ -521,23 +531,28 @@ function createBrowserApi() {
       saveStore(store);
       return currency;
     },
-    updateChaseItemValue: async (id: number, valueInExalts: number) => {
+    updateChaseItemValue: async (id: number, valueInDivines: number) => {
       const store = loadStore();
       const item = store.chaseItems.find((row) => row.id === id);
-      if (item) item.default_value_in_exalts = Math.max(0, Number(valueInExalts) || 0);
+      if (item) {
+        item.default_value_in_divines = Math.max(0, Number(valueInDivines) || 0);
+        item.default_value_in_exalts = item.default_value_in_divines * divineRateForStore(store);
+      }
       saveStore(store);
     },
-    createChaseItem: async (name: string, valueInExalts: number, notes: string) => {
+    createChaseItem: async (name: string, valueInDivines: number, notes: string) => {
       const store = loadStore();
       const trimmedName = name.trim();
       if (!trimmedName) throw new Error('Chase item name is required');
       if (store.chaseItems.some((row) => row.name.toLowerCase() === trimmedName.toLowerCase() && row.active)) {
         throw new Error('A chase item with that name already exists');
       }
+      const value = Math.max(0, Number(valueInDivines) || 0);
       const item = {
         id: nextId(store),
         name: trimmedName,
-        default_value_in_exalts: Math.max(0, Number(valueInExalts) || 0),
+        default_value_in_exalts: value * divineRateForStore(store),
+        default_value_in_divines: value,
         notes,
         active: true
       };

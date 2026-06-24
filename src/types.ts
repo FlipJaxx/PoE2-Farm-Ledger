@@ -12,6 +12,7 @@ export type ChaseItem = {
   id: number;
   name: string;
   default_value_in_exalts: number;
+  default_value_in_divines: number;
   notes: string;
   active: boolean;
 };
