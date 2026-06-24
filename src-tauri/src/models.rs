@@ -6,6 +6,7 @@ pub struct Currency {
     pub name: String,
     pub short_name: String,
     pub value_in_exalts: f64,
+    pub display_order: i64,
     pub is_default: bool,
     pub active: bool,
 }
@@ -166,4 +167,10 @@ pub struct UpdateStrategyRequest {
     pub default_notes: String,
     pub default_investment_rows: String,
     pub default_chase_items: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateMechanicRequest {
+    pub name: String,
+    pub description: String,
 }

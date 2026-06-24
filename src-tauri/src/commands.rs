@@ -231,7 +231,7 @@ pub fn list_sessions(state: State<'_, AppState>) -> Result<Vec<FarmSession>, Str
 pub fn list_currencies(state: State<'_, AppState>) -> Result<Vec<Currency>, String> {
     let conn = state.connection()?;
     let mut stmt = conn
-        .prepare("SELECT id, name, short_name, value_in_exalts, is_default, active FROM currencies ORDER BY is_default DESC, name")
+        .prepare("SELECT id, name, short_name, value_in_exalts, display_order, is_default, active FROM currencies ORDER BY display_order, name")
         .map_err(|err| err.to_string())?;
     stmt.query_map([], currency_from_row)
         .map_err(|err| err.to_string())?
@@ -263,6 +263,23 @@ pub fn update_currency_value(
 }
 
 #[tauri::command]
+pub fn update_currency_order(
+    state: State<'_, AppState>,
+    currency_ids: Vec<i64>,
+) -> Result<(), String> {
+    let mut conn = state.connection()?;
+    let tx = conn.transaction().map_err(|err| err.to_string())?;
+    for (index, id) in currency_ids.iter().enumerate() {
+        tx.execute(
+            "UPDATE currencies SET display_order = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2",
+            params![(index as i64 + 1) * 10, id],
+        )
+        .map_err(|err| err.to_string())?;
+    }
+    tx.commit().map_err(|err| err.to_string())
+}
+
+#[tauri::command]
 pub fn create_custom_currency(
     state: State<'_, AppState>,
     name: String,
@@ -270,15 +287,22 @@ pub fn create_custom_currency(
     value_in_exalts: f64,
 ) -> Result<Currency, String> {
     let conn = state.connection()?;
+    let display_order: i64 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(display_order), 0) + 10 FROM currencies",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|err| err.to_string())?;
     conn.execute(
-        "INSERT INTO currencies (name, short_name, value_in_exalts, is_default) VALUES (?1, ?2, ?3, 0)",
-        params![name.trim(), short_name.trim(), value_in_exalts.max(0.0)],
+        "INSERT INTO currencies (name, short_name, value_in_exalts, display_order, is_default) VALUES (?1, ?2, ?3, ?4, 0)",
+        params![name.trim(), short_name.trim(), value_in_exalts.max(0.0), display_order],
     )
     .map_err(|err| err.to_string())?;
     let id = conn.last_insert_rowid();
     insert_price_snapshot(&conn, name.trim(), "currency", value_in_exalts)?;
     conn.query_row(
-        "SELECT id, name, short_name, value_in_exalts, is_default, active FROM currencies WHERE id = ?1",
+        "SELECT id, name, short_name, value_in_exalts, display_order, is_default, active FROM currencies WHERE id = ?1",
         params![id],
         currency_from_row,
     )
@@ -356,6 +380,32 @@ pub fn list_mechanics(state: State<'_, AppState>) -> Result<Vec<Mechanic>, Strin
 }
 
 #[tauri::command]
+pub fn create_mechanic(
+    state: State<'_, AppState>,
+    input: CreateMechanicRequest,
+) -> Result<Mechanic, String> {
+    let conn = state.connection()?;
+    let name = input.name.trim();
+    if name.is_empty() {
+        return Err("Mechanic name is required".to_string());
+    }
+
+    conn.execute(
+        "INSERT INTO mechanics (name, description, is_default) VALUES (?1, ?2, 0)",
+        params![name, input.description.trim()],
+    )
+    .map_err(|err| err.to_string())?;
+
+    let id = conn.last_insert_rowid();
+    conn.query_row(
+        "SELECT id, name, description, is_default, active FROM mechanics WHERE id = ?1",
+        params![id],
+        mechanic_from_row,
+    )
+    .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
 pub fn create_strategy(
     state: State<'_, AppState>,
     input: CreateStrategyRequest,
@@ -426,7 +476,7 @@ pub fn get_reports_data(state: State<'_, AppState>) -> Result<ReportsData, Strin
 fn seed_session_price_rows(conn: &Connection, session_id: i64) -> Result<(), String> {
     {
         let mut stmt = conn
-            .prepare("SELECT name, value_in_exalts FROM currencies WHERE active = 1 ORDER BY is_default DESC, name")
+            .prepare("SELECT name, value_in_exalts FROM currencies WHERE active = 1 ORDER BY display_order, name")
             .map_err(|err| err.to_string())?;
         let rows = stmt
             .query_map([], |row| {
@@ -704,8 +754,9 @@ fn currency_from_row(row: &rusqlite::Row) -> rusqlite::Result<Currency> {
         name: row.get(1)?,
         short_name: row.get(2)?,
         value_in_exalts: row.get(3)?,
-        is_default: row.get::<_, i64>(4)? == 1,
-        active: row.get::<_, i64>(5)? == 1,
+        display_order: row.get(4)?,
+        is_default: row.get::<_, i64>(5)? == 1,
+        active: row.get::<_, i64>(6)? == 1,
     })
 }
 

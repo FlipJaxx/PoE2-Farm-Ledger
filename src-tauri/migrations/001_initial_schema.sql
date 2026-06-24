@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS currencies (
     name TEXT NOT NULL UNIQUE,
     short_name TEXT NOT NULL,
     value_in_exalts REAL NOT NULL,
+    display_order INTEGER NOT NULL DEFAULT 0,
     is_default INTEGER NOT NULL DEFAULT 0,
     active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,

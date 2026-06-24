@@ -10,6 +10,7 @@ pub fn migrate_and_seed(conn: &Connection) -> Result<()> {
             name TEXT NOT NULL UNIQUE,
             short_name TEXT NOT NULL,
             value_in_exalts REAL NOT NULL,
+            display_order INTEGER NOT NULL DEFAULT 0,
             is_default INTEGER NOT NULL DEFAULT 0,
             active INTEGER NOT NULL DEFAULT 1,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -115,29 +116,57 @@ pub fn migrate_and_seed(conn: &Connection) -> Result<()> {
         ",
     )?;
 
+    ensure_currency_order_column(conn)?;
     seed_currencies(conn)?;
     seed_chase_items(conn)?;
     seed_mechanics(conn)?;
     Ok(())
 }
 
+fn ensure_currency_order_column(conn: &Connection) -> Result<()> {
+    let has_display_order = {
+        let mut stmt = conn.prepare("PRAGMA table_info(currencies)")?;
+        let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
+        let mut found = false;
+        for column in columns {
+            if column? == "display_order" {
+                found = true;
+                break;
+            }
+        }
+        found
+    };
+
+    if !has_display_order {
+        conn.execute(
+            "ALTER TABLE currencies ADD COLUMN display_order INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+    }
+    Ok(())
+}
+
 fn seed_currencies(conn: &Connection) -> Result<()> {
     let currencies = [
-        ("Exalted Orb", "ex", 1.0),
-        ("Greater Exalted Orb", "gex", 10.0),
-        ("Perfect Exalted Orb", "pex", 80.0),
-        ("Chaos Orb", "c", 0.5),
-        ("Greater Chaos Orb", "gc", 8.0),
-        ("Perfect Chaos Orb", "pc", 60.0),
-        ("Divine Orb", "div", 120.0),
-        ("Orb of Annulment", "annul", 15.0),
-        ("Mirror of Kalandra", "mirror", 50000.0),
+        ("Exalted Orb", "ex", 1.0, 10),
+        ("Greater Exalted Orb", "gex", 10.0, 20),
+        ("Perfect Exalted Orb", "pex", 80.0, 30),
+        ("Chaos Orb", "c", 0.5, 40),
+        ("Greater Chaos Orb", "gc", 8.0, 50),
+        ("Perfect Chaos Orb", "pc", 60.0, 60),
+        ("Divine Orb", "div", 120.0, 70),
+        ("Orb of Annulment", "annul", 15.0, 80),
+        ("Mirror of Kalandra", "mirror", 50000.0, 90),
     ];
 
-    for (name, short_name, value) in currencies {
+    for (name, short_name, value, display_order) in currencies {
         conn.execute(
-            "INSERT OR IGNORE INTO currencies (name, short_name, value_in_exalts, is_default) VALUES (?1, ?2, ?3, 1)",
-            params![name, short_name, value],
+            "INSERT OR IGNORE INTO currencies (name, short_name, value_in_exalts, display_order, is_default) VALUES (?1, ?2, ?3, ?4, 1)",
+            params![name, short_name, value, display_order],
+        )?;
+        conn.execute(
+            "UPDATE currencies SET display_order = ?1 WHERE name = ?2 AND is_default = 1",
+            params![display_order, name],
         )?;
     }
     Ok(())

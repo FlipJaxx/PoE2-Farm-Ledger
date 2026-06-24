@@ -3,6 +3,7 @@ export type Currency = {
   name: string;
   short_name: string;
   value_in_exalts: number;
+  display_order: number;
   is_default: boolean;
   active: boolean;
 };

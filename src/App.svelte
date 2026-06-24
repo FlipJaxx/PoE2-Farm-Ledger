@@ -49,6 +49,7 @@
   let investment = { investment_type: 'Maps', item_name: '', count: 1, value_in_exalts: 0 };
   let newCurrency = { name: '', short_name: '', value_in_exalts: 0 };
   let newChase = { name: '', value_in_exalts: 0, notes: '' };
+  let newMechanic = { name: '', description: '' };
   let strategyForm = {
     id: 0,
     name: '',
@@ -218,6 +219,18 @@
     await api.updateCurrencyValue(currency.id, Number(currency.value_in_exalts) || 0);
   }
 
+  async function moveCurrency(currency: Currency, direction: -1 | 1) {
+    const index = currencies.findIndex((row) => row.id === currency.id);
+    const targetIndex = index + direction;
+    if (index < 0 || targetIndex < 0 || targetIndex >= currencies.length) return;
+
+    const nextCurrencies = [...currencies];
+    [nextCurrencies[index], nextCurrencies[targetIndex]] = [nextCurrencies[targetIndex], nextCurrencies[index]];
+    currencies = nextCurrencies.map((row, orderIndex) => ({ ...row, display_order: (orderIndex + 1) * 10 }));
+    await api.updateCurrencyOrder(currencies.map((row) => row.id));
+    currencies = await api.currencies();
+  }
+
   async function saveChase(item: ChaseItem) {
     await api.updateChaseItemValue(item.id, Number(item.default_value_in_exalts) || 0);
   }
@@ -234,6 +247,13 @@
     await api.createChaseItem(newChase.name, newChase.value_in_exalts, newChase.notes);
     newChase = { name: '', value_in_exalts: 0, notes: '' };
     [currencies, chaseItems] = await Promise.all([api.currencies(), api.chaseItems()]);
+  }
+
+  async function addMechanic() {
+    if (!newMechanic.name.trim()) return;
+    await api.createMechanic(newMechanic);
+    newMechanic = { name: '', description: '' };
+    await loadShared();
   }
 
   function editStrategy(strategy: Strategy) {
@@ -412,7 +432,7 @@
       <div class="two-col">
         <section class="panel">
           <h2>Currencies</h2>
-          <PriceTable rows={currencies} valueKey="value_in_exalts" save={saveCurrency} />
+          <PriceTable rows={currencies} valueKey="value_in_exalts" save={saveCurrency} move={moveCurrency} />
           <div class="inline-form">
             <input bind:value={newCurrency.name} placeholder="Currency name" />
             <input bind:value={newCurrency.short_name} placeholder="Short" />
@@ -454,6 +474,18 @@
           </table>
         </section>
       </div>
+      <section class="panel">
+        <h2>Mechanics</h2>
+        <div class="inline-form mechanic-form">
+          <input bind:value={newMechanic.name} placeholder="Mechanic name" />
+          <input bind:value={newMechanic.description} placeholder="Description" />
+          <button on:click={addMechanic}>Add</button>
+        </div>
+        <table>
+          <thead><tr><th>Name</th><th>Description</th><th>Type</th></tr></thead>
+          <tbody>{#each mechanics as mechanic}<tr><td>{mechanic.name}</td><td>{mechanic.description}</td><td>{mechanic.is_default ? 'Default' : 'Custom'}</td></tr>{/each}</tbody>
+        </table>
+      </section>
     {:else if path === '/reports'}
       <header class="page-head"><h1>Reports</h1></header>
       {#if reports}
