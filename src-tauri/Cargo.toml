@@ -1,0 +1,25 @@
+[package]
+name = "exile-farm-ledger"
+version = "0.1.0"
+description = "Manual Path of Exile 2 farming ledger"
+authors = ["Exile Farm Ledger"]
+edition = "2021"
+
+[lib]
+name = "exile_farm_ledger_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "exile-farm-ledger"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+chrono = { version = "0.4", features = ["serde"] }
+rusqlite = { version = "0.31", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = [] }
+thiserror = "1"
