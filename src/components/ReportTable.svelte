@@ -22,7 +22,10 @@
     </tr>
   </thead>
   <tbody>
-    {#each rows as row}
+    {#if rows.length === 0}
+      <tr><td class="empty" colspan={compact ? 5 : 9}>Ingen fullførte økter ennå.</td></tr>
+    {:else}
+      {#each rows as row}
       <tr>
         <td>{row.group_name}</td>
         <td>{row.sessions}</td>
@@ -36,6 +39,7 @@
           <td>{fmt(row.worst_session_profit)} ex</td>
         {/if}
       </tr>
-    {/each}
+      {/each}
+    {/if}
   </tbody>
 </table>

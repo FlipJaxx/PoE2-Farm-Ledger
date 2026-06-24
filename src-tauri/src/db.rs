@@ -1,6 +1,7 @@
 use rusqlite::Connection;
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::time::Duration;
 use tauri::Manager;
 
 #[derive(Default)]
@@ -30,6 +31,11 @@ impl AppState {
             .map_err(|err| err.to_string())?
             .clone()
             .ok_or_else(|| "Database has not been initialized".to_string())?;
-        Connection::open(path).map_err(|err| err.to_string())
+        let conn = Connection::open(path).map_err(|err| err.to_string())?;
+        conn.busy_timeout(Duration::from_secs(5))
+            .map_err(|err| err.to_string())?;
+        conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")
+            .map_err(|err| err.to_string())?;
+        Ok(conn)
     }
 }

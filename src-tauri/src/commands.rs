@@ -3,7 +3,29 @@ use crate::db::AppState;
 use crate::models::*;
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
+use serde::Deserialize;
 use tauri::{AppHandle, State};
+
+#[derive(Deserialize)]
+struct DefaultInvestmentRow {
+    #[serde(default)]
+    investment_type: String,
+    #[serde(default)]
+    item_name: String,
+    #[serde(default)]
+    count: f64,
+    #[serde(default)]
+    value_in_exalts: f64,
+}
+
+fn map_unique(err: rusqlite::Error, message: &str) -> String {
+    if let rusqlite::Error::SqliteFailure(error, _) = &err {
+        if error.code == rusqlite::ErrorCode::ConstraintViolation {
+            return message.to_string();
+        }
+    }
+    err.to_string()
+}
 
 #[tauri::command]
 pub fn initialize_database(app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
@@ -95,6 +117,10 @@ pub fn create_session(
     .map_err(|err| err.to_string())?;
     let id = conn.last_insert_rowid();
     seed_session_price_rows(&conn, id)?;
+    if let Some(strategy_id) = input.strategy_id {
+        apply_strategy_defaults(&conn, id, strategy_id)?;
+        refresh_running_totals(&conn, id)?;
+    }
     get_session_row(&conn, id)
 }
 
@@ -287,6 +313,12 @@ pub fn create_custom_currency(
     value_in_exalts: f64,
 ) -> Result<Currency, String> {
     let conn = state.connection()?;
+    let name = name.trim();
+    let short_name = short_name.trim();
+    if name.is_empty() {
+        return Err("Currency name is required".to_string());
+    }
+
     let display_order: i64 = conn
         .query_row(
             "SELECT COALESCE(MAX(display_order), 0) + 10 FROM currencies",
@@ -296,11 +328,11 @@ pub fn create_custom_currency(
         .map_err(|err| err.to_string())?;
     conn.execute(
         "INSERT INTO currencies (name, short_name, value_in_exalts, display_order, is_default) VALUES (?1, ?2, ?3, ?4, 0)",
-        params![name.trim(), short_name.trim(), value_in_exalts.max(0.0), display_order],
+        params![name, short_name, value_in_exalts.max(0.0), display_order],
     )
-    .map_err(|err| err.to_string())?;
+    .map_err(|err| map_unique(err, "A currency with that name already exists"))?;
     let id = conn.last_insert_rowid();
-    insert_price_snapshot(&conn, name.trim(), "currency", value_in_exalts)?;
+    insert_price_snapshot(&conn, name, "currency", value_in_exalts)?;
     conn.query_row(
         "SELECT id, name, short_name, value_in_exalts, display_order, is_default, active FROM currencies WHERE id = ?1",
         params![id],
@@ -352,13 +384,18 @@ pub fn create_chase_item(
     notes: String,
 ) -> Result<ChaseItem, String> {
     let conn = state.connection()?;
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("Chase item name is required".to_string());
+    }
+
     conn.execute(
         "INSERT INTO chase_items (name, default_value_in_exalts, notes) VALUES (?1, ?2, ?3)",
-        params![name.trim(), value_in_exalts.max(0.0), notes],
+        params![name, value_in_exalts.max(0.0), notes],
     )
-    .map_err(|err| err.to_string())?;
+    .map_err(|err| map_unique(err, "A chase item with that name already exists"))?;
     let id = conn.last_insert_rowid();
-    insert_price_snapshot(&conn, name.trim(), "chase", value_in_exalts)?;
+    insert_price_snapshot(&conn, name, "chase", value_in_exalts)?;
     conn.query_row(
         "SELECT id, name, default_value_in_exalts, notes, active FROM chase_items WHERE id = ?1",
         params![id],
@@ -411,10 +448,15 @@ pub fn create_strategy(
     input: CreateStrategyRequest,
 ) -> Result<Strategy, String> {
     let conn = state.connection()?;
+    let name = input.name.trim();
+    if name.is_empty() {
+        return Err("Strategy name is required".to_string());
+    }
+
     conn.execute(
         "INSERT INTO strategies (name, mechanic_id, description, default_notes, default_investment_rows, default_chase_items)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![input.name, input.mechanic_id, input.description, input.default_notes, input.default_investment_rows, input.default_chase_items],
+        params![name, input.mechanic_id, input.description, input.default_notes, input.default_investment_rows, input.default_chase_items],
     )
     .map_err(|err| err.to_string())?;
     get_strategy_row(&conn, conn.last_insert_rowid())
@@ -511,6 +553,63 @@ fn seed_session_price_rows(conn: &Connection, session_id: i64) -> Result<(), Str
             params![session_id, name, value],
         )
         .map_err(|err| err.to_string())?;
+    }
+    Ok(())
+}
+
+fn apply_strategy_defaults(
+    conn: &Connection,
+    session_id: i64,
+    strategy_id: i64,
+) -> Result<(), String> {
+    let row = conn
+        .query_row(
+            "SELECT default_notes, default_investment_rows FROM strategies WHERE id = ?1",
+            params![strategy_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()
+        .map_err(|err| err.to_string())?;
+
+    let Some((default_notes, default_investment_rows)) = row else {
+        return Ok(());
+    };
+
+    if !default_notes.trim().is_empty() {
+        conn.execute(
+            "UPDATE farm_sessions SET notes = ?1 WHERE id = ?2 AND (notes IS NULL OR notes = '')",
+            params![default_notes, session_id],
+        )
+        .map_err(|err| err.to_string())?;
+    }
+
+    if let Ok(rows) =
+        serde_json::from_str::<Vec<DefaultInvestmentRow>>(&default_investment_rows)
+    {
+        for row in rows {
+            let item_name = row.item_name.trim();
+            if item_name.is_empty() {
+                continue;
+            }
+            let total = line_total(row.count, row.value_in_exalts);
+            conn.execute(
+                "INSERT INTO session_investments
+                 (session_id, investment_type, item_name, count, value_in_exalts_snapshot, total_value_exalts)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                 ON CONFLICT(session_id, investment_type, item_name) DO UPDATE SET
+                 count = excluded.count, value_in_exalts_snapshot = excluded.value_in_exalts_snapshot,
+                 total_value_exalts = excluded.total_value_exalts, updated_at = CURRENT_TIMESTAMP",
+                params![
+                    session_id,
+                    row.investment_type.trim(),
+                    item_name,
+                    row.count.max(0.0),
+                    row.value_in_exalts.max(0.0),
+                    total
+                ],
+            )
+            .map_err(|err| err.to_string())?;
+        }
     }
     Ok(())
 }

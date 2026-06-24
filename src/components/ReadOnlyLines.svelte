@@ -11,7 +11,10 @@
   <table>
     <thead><tr><th>Type</th><th>Name</th><th>Count</th><th>Value/ex</th><th>Total</th></tr></thead>
     <tbody>
-      {#each rows as line}
+      {#if rows.length === 0}
+        <tr><td class="empty" colspan="5">Ingen data ennå.</td></tr>
+      {:else}
+        {#each rows as line}
         <tr>
           <td>{line.item_type || line.investment_type}</td>
           <td>{line.item_name}</td>
@@ -19,7 +22,8 @@
           <td>{fmt(line.value_in_exalts_snapshot, 2)}</td>
           <td>{fmt(line.total_value_exalts, 2)} ex</td>
         </tr>
-      {/each}
+        {/each}
+      {/if}
     </tbody>
   </table>
 </section>

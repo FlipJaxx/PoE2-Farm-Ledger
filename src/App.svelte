@@ -70,13 +70,18 @@
     ['/settings', 'Settings']
   ];
 
-  onMount(async () => {
-    window.addEventListener('popstate', () => {
+  onMount(() => {
+    const onPop = () => {
       path = window.location.pathname;
       loadRoute();
-    });
-    setInterval(() => (tick = Date.now()), 1000);
-    await boot();
+    };
+    window.addEventListener('popstate', onPop);
+    const timer = setInterval(() => (tick = Date.now()), 1000);
+    boot();
+    return () => {
+      window.removeEventListener('popstate', onPop);
+      clearInterval(timer);
+    };
   });
 
   async function boot() {
@@ -236,17 +241,33 @@
   }
 
   async function addCurrency() {
-    if (!newCurrency.name.trim()) return;
-    await api.createCustomCurrency(newCurrency.name, newCurrency.short_name, newCurrency.value_in_exalts);
-    newCurrency = { name: '', short_name: '', value_in_exalts: 0 };
-    [currencies, chaseItems] = await Promise.all([api.currencies(), api.chaseItems()]);
+    if (!newCurrency.name.trim()) {
+      error = 'Currency name is required';
+      return;
+    }
+    try {
+      error = '';
+      await api.createCustomCurrency(newCurrency.name, newCurrency.short_name, newCurrency.value_in_exalts);
+      newCurrency = { name: '', short_name: '', value_in_exalts: 0 };
+      [currencies, chaseItems] = await Promise.all([api.currencies(), api.chaseItems()]);
+    } catch (err) {
+      error = String(err);
+    }
   }
 
   async function addChase() {
-    if (!newChase.name.trim()) return;
-    await api.createChaseItem(newChase.name, newChase.value_in_exalts, newChase.notes);
-    newChase = { name: '', value_in_exalts: 0, notes: '' };
-    [currencies, chaseItems] = await Promise.all([api.currencies(), api.chaseItems()]);
+    if (!newChase.name.trim()) {
+      error = 'Chase item name is required';
+      return;
+    }
+    try {
+      error = '';
+      await api.createChaseItem(newChase.name, newChase.value_in_exalts, newChase.notes);
+      newChase = { name: '', value_in_exalts: 0, notes: '' };
+      [currencies, chaseItems] = await Promise.all([api.currencies(), api.chaseItems()]);
+    } catch (err) {
+      error = String(err);
+    }
   }
 
   async function addMechanic() {
@@ -269,20 +290,28 @@
   }
 
   async function saveStrategy() {
-    if (!strategyForm.name.trim()) return;
-    const input = { ...strategyForm };
-    if (strategyForm.id) await api.updateStrategy(input);
-    else await api.createStrategy(input);
-    strategyForm = {
-      id: 0,
-      name: '',
-      mechanic_id: null,
-      description: '',
-      default_notes: '',
-      default_investment_rows: '[]',
-      default_chase_items: '[]'
-    };
-    await loadShared();
+    if (!strategyForm.name.trim()) {
+      error = 'Strategy name is required';
+      return;
+    }
+    try {
+      error = '';
+      const input = { ...strategyForm };
+      if (strategyForm.id) await api.updateStrategy(input);
+      else await api.createStrategy(input);
+      strategyForm = {
+        id: 0,
+        name: '',
+        mechanic_id: null,
+        description: '',
+        default_notes: '',
+        default_investment_rows: '[]',
+        default_chase_items: '[]'
+      };
+      await loadShared();
+    } catch (err) {
+      error = String(err);
+    }
   }
 
   async function deleteStrategy(id: number) {
@@ -470,7 +499,15 @@
           <h2>Saved strategies</h2>
           <table>
             <thead><tr><th>Name</th><th>Mechanic</th><th></th></tr></thead>
-            <tbody>{#each strategies as s}<tr><td>{s.name}</td><td>{s.mechanic_name || 'None'}</td><td class="row-actions"><button on:click={() => editStrategy(s)}>Edit</button><button class="ghost" on:click={() => deleteStrategy(s.id)}>Delete</button></td></tr>{/each}</tbody>
+            <tbody>
+              {#if strategies.length === 0}
+                <tr><td class="empty" colspan="3">Ingen lagrede strategier.</td></tr>
+              {:else}
+                {#each strategies as s}
+                  <tr><td>{s.name}</td><td>{s.mechanic_name || 'None'}</td><td class="row-actions"><button on:click={() => editStrategy(s)}>Edit</button><button class="ghost" on:click={() => deleteStrategy(s.id)}>Delete</button></td></tr>
+                {/each}
+              {/if}
+            </tbody>
           </table>
         </section>
       </div>
@@ -483,7 +520,15 @@
         </div>
         <table>
           <thead><tr><th>Name</th><th>Description</th><th>Type</th></tr></thead>
-          <tbody>{#each mechanics as mechanic}<tr><td>{mechanic.name}</td><td>{mechanic.description}</td><td>{mechanic.is_default ? 'Default' : 'Custom'}</td></tr>{/each}</tbody>
+          <tbody>
+            {#if mechanics.length === 0}
+              <tr><td class="empty" colspan="3">Ingen mekanikker.</td></tr>
+            {:else}
+              {#each mechanics as mechanic}
+                <tr><td>{mechanic.name}</td><td>{mechanic.description}</td><td>{mechanic.is_default ? 'Default' : 'Custom'}</td></tr>
+              {/each}
+            {/if}
+          </tbody>
         </table>
       </section>
     {:else if path === '/reports'}

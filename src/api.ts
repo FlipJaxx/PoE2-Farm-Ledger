@@ -186,6 +186,35 @@ function lineTotal(count: number, value: number) {
   return Math.max(0, Number(count) || 0) * Math.max(0, Number(value) || 0);
 }
 
+function defaultInvestmentLines(strategy: Strategy | undefined, sessionId: number, store: Store): SessionLine[] {
+  if (!strategy) return [];
+  try {
+    const rows = JSON.parse(strategy.default_investment_rows) as Array<Record<string, unknown>>;
+    if (!Array.isArray(rows)) return [];
+    return rows
+      .map((row) => {
+        const itemName = String(row.item_name || '').trim();
+        const investmentType = String(row.investment_type || '').trim();
+        const count = Math.max(0, Number(row.count) || 0);
+        const value = Math.max(0, Number(row.value_in_exalts) || 0);
+        if (!itemName) return null;
+        return {
+          id: nextId(store),
+          session_id: sessionId,
+          item_type: null,
+          investment_type: investmentType,
+          item_name: itemName,
+          count,
+          value_in_exalts_snapshot: value,
+          total_value_exalts: lineTotal(count, value)
+        };
+      })
+      .filter((row): row is SessionLine => row !== null);
+  } catch {
+    return [];
+  }
+}
+
 function recalculate(store: Store, sessionId: number) {
   const session = store.sessions.find((row) => row.id === sessionId);
   const detail = store.details[sessionId];
@@ -322,16 +351,18 @@ function createBrowserApi() {
       const store = loadStore();
       if (store.sessions.some((row) => row.status === 'running')) throw new Error('Only one farming session can be running at a time');
       const id = nextId(store);
+      const strategyId = Number(input.strategy_id) || null;
+      const strategy = strategyId ? store.strategies.find((row) => row.id === strategyId) : undefined;
       const session: FarmSession = {
         id,
-        strategy_id: Number(input.strategy_id) || null,
+        strategy_id: strategyId,
         strategy_name: String(input.strategy_name || 'Manual Strategy'),
         mechanic_id: Number(input.mechanic_id) || null,
         mechanic_name: String(input.mechanic_name || 'Custom'),
         character_name: String(input.character_name || ''),
         league: String(input.league || ''),
         map_tier: String(input.map_tier || ''),
-        notes: String(input.notes || ''),
+        notes: String(input.notes || '') || strategy?.default_notes || '',
         status: 'running',
         started_at: new Date().toISOString(),
         ended_at: null,
@@ -370,8 +401,9 @@ function createBrowserApi() {
             total_value_exalts: 0
           }))
         ],
-        investments: []
+        investments: defaultInvestmentLines(strategy, id, store)
       };
+      recalculate(store, id);
       saveStore(store);
       return session;
     },
@@ -470,10 +502,15 @@ function createBrowserApi() {
     },
     createCustomCurrency: async (name: string, shortName: string, valueInExalts: number) => {
       const store = loadStore();
+      const trimmedName = name.trim();
+      if (!trimmedName) throw new Error('Currency name is required');
+      if (store.currencies.some((row) => row.name.toLowerCase() === trimmedName.toLowerCase() && row.active)) {
+        throw new Error('A currency with that name already exists');
+      }
       const displayOrder = Math.max(0, ...store.currencies.map((row) => row.display_order)) + 10;
       const currency = {
         id: nextId(store),
-        name: name.trim(),
+        name: trimmedName,
         short_name: shortName.trim(),
         value_in_exalts: Math.max(0, Number(valueInExalts) || 0),
         display_order: displayOrder,
@@ -492,9 +529,14 @@ function createBrowserApi() {
     },
     createChaseItem: async (name: string, valueInExalts: number, notes: string) => {
       const store = loadStore();
+      const trimmedName = name.trim();
+      if (!trimmedName) throw new Error('Chase item name is required');
+      if (store.chaseItems.some((row) => row.name.toLowerCase() === trimmedName.toLowerCase() && row.active)) {
+        throw new Error('A chase item with that name already exists');
+      }
       const item = {
         id: nextId(store),
-        name: name.trim(),
+        name: trimmedName,
         default_value_in_exalts: Math.max(0, Number(valueInExalts) || 0),
         notes,
         active: true
@@ -506,9 +548,11 @@ function createBrowserApi() {
     createStrategy: async (input: Record<string, unknown>) => {
       const store = loadStore();
       const mechanicId = Number(input.mechanic_id) || null;
+      const name = String(input.name || '').trim();
+      if (!name) throw new Error('Strategy name is required');
       const strategy = {
         id: nextId(store),
-        name: String(input.name || '').trim(),
+        name,
         mechanic_id: mechanicId,
         mechanic_name: store.mechanics.find((row) => row.id === mechanicId)?.name ?? null,
         description: String(input.description || ''),
