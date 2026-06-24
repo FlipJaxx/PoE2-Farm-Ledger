@@ -292,10 +292,12 @@ pub fn list_currencies(state: State<'_, AppState>) -> Result<Vec<Currency>, Stri
     let mut stmt = conn
         .prepare("SELECT id, name, short_name, value_in_exalts, display_order, is_default, active FROM currencies WHERE active = 1 ORDER BY display_order, name")
         .map_err(|err| err.to_string())?;
-    stmt.query_map([], currency_from_row)
+    let currencies = stmt
+        .query_map([], currency_from_row)
         .map_err(|err| err.to_string())?
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|err| err.to_string())
+        .map_err(|err| err.to_string())?;
+    Ok(currencies)
 }
 
 #[tauri::command]
@@ -385,10 +387,12 @@ pub fn list_chase_items(state: State<'_, AppState>) -> Result<Vec<ChaseItem>, St
     let mut stmt = conn
         .prepare("SELECT id, name, default_value_in_exalts, default_value_in_divines, notes, active FROM chase_items WHERE active = 1 ORDER BY name")
         .map_err(|err| err.to_string())?;
-    stmt.query_map([], chase_from_row)
+    let items = stmt
+        .query_map([], chase_from_row)
         .map_err(|err| err.to_string())?
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|err| err.to_string())
+        .map_err(|err| err.to_string())?;
+    Ok(items)
 }
 
 #[tauri::command]
@@ -458,10 +462,12 @@ pub fn list_mechanics(state: State<'_, AppState>) -> Result<Vec<Mechanic>, Strin
     let mut stmt = conn
         .prepare("SELECT id, name, description, is_default, active FROM mechanics WHERE active = 1 ORDER BY id")
         .map_err(|err| err.to_string())?;
-    stmt.query_map([], mechanic_from_row)
+    let mechanics = stmt
+        .query_map([], mechanic_from_row)
         .map_err(|err| err.to_string())?
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|err| err.to_string())
+        .map_err(|err| err.to_string())?;
+    Ok(mechanics)
 }
 
 #[tauri::command]
@@ -581,10 +587,12 @@ pub fn list_strategies(state: State<'_, AppState>) -> Result<Vec<Strategy>, Stri
              WHERE s.active = 1 ORDER BY s.name",
         )
         .map_err(|err| err.to_string())?;
-    stmt.query_map([], strategy_from_row)
+    let strategies = stmt
+        .query_map([], strategy_from_row)
         .map_err(|err| err.to_string())?
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|err| err.to_string())
+        .map_err(|err| err.to_string())?;
+    Ok(strategies)
 }
 
 #[tauri::command]
@@ -905,10 +913,12 @@ fn get_session_row(conn: &Connection, id: i64) -> Result<FarmSession, String> {
 fn list_sessions_query(conn: &Connection, limit: i64) -> Result<Vec<FarmSession>, String> {
     let sql = session_select_sql("ORDER BY started_at DESC LIMIT ?1");
     let mut stmt = conn.prepare(&sql).map_err(|err| err.to_string())?;
-    stmt.query_map(params![limit], farm_session_from_row)
+    let sessions = stmt
+        .query_map(params![limit], farm_session_from_row)
         .map_err(|err| err.to_string())?
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|err| err.to_string())
+        .map_err(|err| err.to_string())?;
+    Ok(sessions)
 }
 
 fn session_select_sql(tail: &str) -> String {
@@ -927,21 +937,23 @@ fn session_loot_rows(conn: &Connection, session_id: i64) -> Result<Vec<SessionLi
              FROM session_loot WHERE session_id = ?1 ORDER BY item_type, item_name",
         )
         .map_err(|err| err.to_string())?;
-    stmt.query_map(params![session_id], |row| {
-        Ok(SessionLine {
-            id: row.get(0)?,
-            session_id: row.get(1)?,
-            item_type: Some(row.get(2)?),
-            investment_type: None,
-            item_name: row.get(3)?,
-            count: row.get(4)?,
-            value_in_exalts_snapshot: row.get(5)?,
-            total_value_exalts: row.get(6)?,
+    let rows = stmt
+        .query_map(params![session_id], |row| {
+            Ok(SessionLine {
+                id: row.get(0)?,
+                session_id: row.get(1)?,
+                item_type: Some(row.get(2)?),
+                investment_type: None,
+                item_name: row.get(3)?,
+                count: row.get(4)?,
+                value_in_exalts_snapshot: row.get(5)?,
+                total_value_exalts: row.get(6)?,
+            })
         })
-    })
-    .map_err(|err| err.to_string())?
-    .collect::<Result<Vec<_>, _>>()
-    .map_err(|err| err.to_string())
+        .map_err(|err| err.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|err| err.to_string())?;
+    Ok(rows)
 }
 
 fn session_investment_rows(conn: &Connection, session_id: i64) -> Result<Vec<SessionLine>, String> {
@@ -951,21 +963,23 @@ fn session_investment_rows(conn: &Connection, session_id: i64) -> Result<Vec<Ses
              FROM session_investments WHERE session_id = ?1 ORDER BY investment_type, item_name",
         )
         .map_err(|err| err.to_string())?;
-    stmt.query_map(params![session_id], |row| {
-        Ok(SessionLine {
-            id: row.get(0)?,
-            session_id: row.get(1)?,
-            item_type: None,
-            investment_type: Some(row.get(2)?),
-            item_name: row.get(3)?,
-            count: row.get(4)?,
-            value_in_exalts_snapshot: row.get(5)?,
-            total_value_exalts: row.get(6)?,
+    let rows = stmt
+        .query_map(params![session_id], |row| {
+            Ok(SessionLine {
+                id: row.get(0)?,
+                session_id: row.get(1)?,
+                item_type: None,
+                investment_type: Some(row.get(2)?),
+                item_name: row.get(3)?,
+                count: row.get(4)?,
+                value_in_exalts_snapshot: row.get(5)?,
+                total_value_exalts: row.get(6)?,
+            })
         })
-    })
-    .map_err(|err| err.to_string())?
-    .collect::<Result<Vec<_>, _>>()
-    .map_err(|err| err.to_string())
+        .map_err(|err| err.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|err| err.to_string())?;
+    Ok(rows)
 }
 
 fn report_query(
@@ -987,22 +1001,24 @@ fn report_query(
          GROUP BY {group_column} ORDER BY 3 DESC LIMIT ?1"
     );
     let mut stmt = conn.prepare(&sql).map_err(|err| err.to_string())?;
-    stmt.query_map(params![limit], |row| {
-        Ok(ReportRow {
-            group_name: row.get(0)?,
-            sessions: row.get(1)?,
-            average_profit_per_hour: row.get(2)?,
-            average_profit_per_map: row.get(3)?,
-            total_maps: row.get(4)?,
-            total_time_seconds: row.get(5)?,
-            total_net_profit: row.get(6)?,
-            best_session_profit: row.get(7)?,
-            worst_session_profit: row.get(8)?,
+    let rows = stmt
+        .query_map(params![limit], |row| {
+            Ok(ReportRow {
+                group_name: row.get(0)?,
+                sessions: row.get(1)?,
+                average_profit_per_hour: row.get(2)?,
+                average_profit_per_map: row.get(3)?,
+                total_maps: row.get(4)?,
+                total_time_seconds: row.get(5)?,
+                total_net_profit: row.get(6)?,
+                best_session_profit: row.get(7)?,
+                worst_session_profit: row.get(8)?,
+            })
         })
-    })
-    .map_err(|err| err.to_string())?
-    .collect::<Result<Vec<_>, _>>()
-    .map_err(|err| err.to_string())
+        .map_err(|err| err.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|err| err.to_string())?;
+    Ok(rows)
 }
 
 fn get_strategy_row(conn: &Connection, id: i64) -> Result<Strategy, String> {
