@@ -37,10 +37,12 @@ const tauriApi = {
   updateCurrencyOrder: (currencyIds: number[]) => invoke<void>('update_currency_order', { currencyIds }),
   createCustomCurrency: (name: string, shortName: string, valueInExalts: number) =>
     invoke<Currency>('create_custom_currency', { name, shortName, valueInExalts }),
+  deleteCurrency: (id: number) => invoke<void>('delete_currency', { id }),
   updateChaseItemValue: (id: number, valueInDivines: number) =>
     invoke<void>('update_chase_item_value', { id, valueInDivines }),
   createChaseItem: (name: string, valueInDivines: number, notes: string) =>
     invoke<ChaseItem>('create_chase_item', { name, valueInDivines, notes }),
+  deleteChaseItem: (id: number) => invoke<void>('delete_chase_item', { id }),
   createStrategy: (input: Record<string, unknown>) => invoke<Strategy>('create_strategy', { input }),
   updateStrategy: (input: Record<string, unknown>) => invoke<Strategy>('update_strategy', { input }),
   deleteStrategy: (id: number) => invoke<void>('delete_strategy', { id })
@@ -514,6 +516,14 @@ function createBrowserApi() {
       const store = loadStore();
       const trimmedName = name.trim();
       if (!trimmedName) throw new Error('Currency name is required');
+      const inactive = store.currencies.find((row) => row.name.toLowerCase() === trimmedName.toLowerCase() && !row.active);
+      if (inactive) {
+        inactive.short_name = shortName.trim();
+        inactive.value_in_exalts = Math.max(0, Number(valueInExalts) || 0);
+        inactive.active = true;
+        saveStore(store);
+        return inactive;
+      }
       if (store.currencies.some((row) => row.name.toLowerCase() === trimmedName.toLowerCase() && row.active)) {
         throw new Error('A currency with that name already exists');
       }
@@ -531,6 +541,17 @@ function createBrowserApi() {
       saveStore(store);
       return currency;
     },
+    deleteCurrency: async (id: number) => {
+      const store = loadStore();
+      const currency = store.currencies.find((row) => row.id === id);
+      if (currency) {
+        if (currency.name === 'Exalted Orb' || currency.name === 'Divine Orb') {
+          throw new Error(`${currency.name} is required and cannot be removed`);
+        }
+        currency.active = false;
+      }
+      saveStore(store);
+    },
     updateChaseItemValue: async (id: number, valueInDivines: number) => {
       const store = loadStore();
       const item = store.chaseItems.find((row) => row.id === id);
@@ -544,10 +565,19 @@ function createBrowserApi() {
       const store = loadStore();
       const trimmedName = name.trim();
       if (!trimmedName) throw new Error('Chase item name is required');
+      const inactive = store.chaseItems.find((row) => row.name.toLowerCase() === trimmedName.toLowerCase() && !row.active);
+      const value = Math.max(0, Number(valueInDivines) || 0);
+      if (inactive) {
+        inactive.default_value_in_divines = value;
+        inactive.default_value_in_exalts = value * divineRateForStore(store);
+        inactive.notes = notes;
+        inactive.active = true;
+        saveStore(store);
+        return inactive;
+      }
       if (store.chaseItems.some((row) => row.name.toLowerCase() === trimmedName.toLowerCase() && row.active)) {
         throw new Error('A chase item with that name already exists');
       }
-      const value = Math.max(0, Number(valueInDivines) || 0);
       const item = {
         id: nextId(store),
         name: trimmedName,
@@ -559,6 +589,12 @@ function createBrowserApi() {
       store.chaseItems.push(item);
       saveStore(store);
       return item;
+    },
+    deleteChaseItem: async (id: number) => {
+      const store = loadStore();
+      const item = store.chaseItems.find((row) => row.id === id);
+      if (item) item.active = false;
+      saveStore(store);
     },
     createStrategy: async (input: Record<string, unknown>) => {
       const store = loadStore();

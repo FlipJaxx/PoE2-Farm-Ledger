@@ -246,8 +246,31 @@
     currencies = await api.currencies();
   }
 
+  async function removeCurrency(currency: Currency) {
+    if (!window.confirm(`Remove ${currency.name} from the list?`)) return;
+    try {
+      error = '';
+      await api.deleteCurrency(currency.id);
+      [currencies, chaseItems] = await Promise.all([api.currencies(), api.chaseItems()]);
+      await refreshDivineRate();
+    } catch (err) {
+      error = String(err);
+    }
+  }
+
   async function saveChase(item: ChaseItem) {
     await api.updateChaseItemValue(item.id, Number(item.default_value_in_divines) || 0);
+  }
+
+  async function removeChase(item: ChaseItem) {
+    if (!window.confirm(`Remove ${item.name} from the list?`)) return;
+    try {
+      error = '';
+      await api.deleteChaseItem(item.id);
+      [currencies, chaseItems] = await Promise.all([api.currencies(), api.chaseItems()]);
+    } catch (err) {
+      error = String(err);
+    }
   }
 
   async function addCurrency() {
@@ -472,7 +495,14 @@
       <div class="two-col">
         <section class="panel">
           <h2>Currencies</h2>
-          <PriceTable rows={currencies} valueKey="value_in_exalts" save={saveCurrency} move={moveCurrency} />
+          <PriceTable
+            rows={currencies}
+            valueKey="value_in_exalts"
+            save={saveCurrency}
+            move={moveCurrency}
+            remove={removeCurrency}
+            protectedNames={['Exalted Orb', 'Divine Orb']}
+          />
           <div class="inline-form">
             <input bind:value={newCurrency.name} placeholder="Currency name" />
             <input bind:value={newCurrency.short_name} placeholder="Short" />
@@ -482,7 +512,7 @@
         </section>
         <section class="panel">
           <h2>Chase Items</h2>
-          <PriceTable rows={chaseItems} valueKey="default_value_in_divines" unitLabel="divines" save={saveChase} />
+          <PriceTable rows={chaseItems} valueKey="default_value_in_divines" unitLabel="divines" save={saveChase} remove={removeChase} />
           <div class="inline-form">
             <input bind:value={newChase.name} placeholder="Item name" />
             <input type="number" min="0" step="0.01" bind:value={newChase.value_in_divines} placeholder="Value (div)" />

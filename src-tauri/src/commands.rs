@@ -18,15 +18,6 @@ struct DefaultInvestmentRow {
     value_in_exalts: f64,
 }
 
-fn map_unique(err: rusqlite::Error, message: &str) -> String {
-    if let rusqlite::Error::SqliteFailure(error, _) = &err {
-        if error.code == rusqlite::ErrorCode::ConstraintViolation {
-            return message.to_string();
-        }
-    }
-    err.to_string()
-}
-
 fn current_divine_rate(conn: &Connection) -> f64 {
     conn.query_row(
         "SELECT value_in_exalts FROM currencies WHERE name = 'Divine Orb'",
@@ -266,7 +257,7 @@ pub fn list_sessions(state: State<'_, AppState>) -> Result<Vec<FarmSession>, Str
 pub fn list_currencies(state: State<'_, AppState>) -> Result<Vec<Currency>, String> {
     let conn = state.connection()?;
     let mut stmt = conn
-        .prepare("SELECT id, name, short_name, value_in_exalts, display_order, is_default, active FROM currencies ORDER BY display_order, name")
+        .prepare("SELECT id, name, short_name, value_in_exalts, display_order, is_default, active FROM currencies WHERE active = 1 ORDER BY display_order, name")
         .map_err(|err| err.to_string())?;
     stmt.query_map([], currency_from_row)
         .map_err(|err| err.to_string())?
@@ -336,15 +327,20 @@ pub fn create_custom_currency(
         )
         .map_err(|err| err.to_string())?;
     conn.execute(
-        "INSERT INTO currencies (name, short_name, value_in_exalts, display_order, is_default) VALUES (?1, ?2, ?3, ?4, 0)",
+        "INSERT INTO currencies (name, short_name, value_in_exalts, display_order, is_default)
+         VALUES (?1, ?2, ?3, ?4, 0)
+         ON CONFLICT(name) DO UPDATE SET
+         short_name = excluded.short_name,
+         value_in_exalts = excluded.value_in_exalts,
+         active = 1,
+         updated_at = CURRENT_TIMESTAMP",
         params![name, short_name, value_in_exalts.max(0.0), display_order],
     )
-    .map_err(|err| map_unique(err, "A currency with that name already exists"))?;
-    let id = conn.last_insert_rowid();
+    .map_err(|err| err.to_string())?;
     insert_price_snapshot(&conn, name, "currency", value_in_exalts)?;
     conn.query_row(
-        "SELECT id, name, short_name, value_in_exalts, display_order, is_default, active FROM currencies WHERE id = ?1",
-        params![id],
+        "SELECT id, name, short_name, value_in_exalts, display_order, is_default, active FROM currencies WHERE name = ?1",
+        params![name],
         currency_from_row,
     )
     .map_err(|err| err.to_string())
@@ -354,7 +350,7 @@ pub fn create_custom_currency(
 pub fn list_chase_items(state: State<'_, AppState>) -> Result<Vec<ChaseItem>, String> {
     let conn = state.connection()?;
     let mut stmt = conn
-        .prepare("SELECT id, name, default_value_in_exalts, default_value_in_divines, notes, active FROM chase_items ORDER BY name")
+        .prepare("SELECT id, name, default_value_in_exalts, default_value_in_divines, notes, active FROM chase_items WHERE active = 1 ORDER BY name")
         .map_err(|err| err.to_string())?;
     stmt.query_map([], chase_from_row)
         .map_err(|err| err.to_string())?
@@ -403,15 +399,21 @@ pub fn create_chase_item(
     let value_in_divines = value_in_divines.max(0.0);
     let value_in_exalts = value_in_divines * current_divine_rate(&conn);
     conn.execute(
-        "INSERT INTO chase_items (name, default_value_in_exalts, default_value_in_divines, notes) VALUES (?1, ?2, ?3, ?4)",
+        "INSERT INTO chase_items (name, default_value_in_exalts, default_value_in_divines, notes)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(name) DO UPDATE SET
+         default_value_in_exalts = excluded.default_value_in_exalts,
+         default_value_in_divines = excluded.default_value_in_divines,
+         notes = excluded.notes,
+         active = 1,
+         updated_at = CURRENT_TIMESTAMP",
         params![name, value_in_exalts, value_in_divines, notes],
     )
-    .map_err(|err| map_unique(err, "A chase item with that name already exists"))?;
-    let id = conn.last_insert_rowid();
+    .map_err(|err| err.to_string())?;
     insert_price_snapshot(&conn, name, "chase", value_in_exalts)?;
     conn.query_row(
-        "SELECT id, name, default_value_in_exalts, default_value_in_divines, notes, active FROM chase_items WHERE id = ?1",
-        params![id],
+        "SELECT id, name, default_value_in_exalts, default_value_in_divines, notes, active FROM chase_items WHERE name = ?1",
+        params![name],
         chase_from_row,
     )
     .map_err(|err| err.to_string())
@@ -496,6 +498,39 @@ pub fn delete_strategy(state: State<'_, AppState>, id: i64) -> Result<(), String
         .connection()?
         .execute(
             "UPDATE strategies SET active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
+            params![id],
+        )
+        .map_err(|err| err.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn delete_currency(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+    let conn = state.connection()?;
+    let name: String = conn
+        .query_row(
+            "SELECT name FROM currencies WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        )
+        .map_err(|err| err.to_string())?;
+    if name == "Exalted Orb" || name == "Divine Orb" {
+        return Err(format!("{name} is required and cannot be removed"));
+    }
+    conn.execute(
+        "UPDATE currencies SET active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
+        params![id],
+    )
+    .map_err(|err| err.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn delete_chase_item(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+    state
+        .connection()?
+        .execute(
+            "UPDATE chase_items SET active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
             params![id],
         )
         .map_err(|err| err.to_string())?;
