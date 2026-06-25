@@ -30,7 +30,7 @@
             <input
               type="number"
               min="0"
-              step="0.01"
+              step="any"
               value={Number(row[valueKey])}
               on:change={(event) => commit(row, event.currentTarget.value)}
             />

@@ -106,3 +106,15 @@ export type ReportsData = {
   by_mechanic: ReportRow[];
   by_strategy: ReportRow[];
 };
+
+export type UpdatedCurrency = {
+  name: string;
+  valueInExalts: number;
+};
+
+export type RefreshResult = {
+  league: string;
+  updated: UpdatedCurrency[];
+  skipped: string[];
+  fetchedAt: string;
+};

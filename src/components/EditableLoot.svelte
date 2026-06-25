@@ -35,12 +35,12 @@
         {#each rows as line}
         <tr>
           <td>{line.item_name}</td>
-          <td><input type="number" min="0" step="0.01" bind:value={line.count} on:change={() => updateLoot(line)} /></td>
+          <td><input type="number" min="0" step="1" bind:value={line.count} on:change={() => updateLoot(line)} /></td>
           <td>
             <input
               type="number"
               min="0"
-              step="0.01"
+              step="any"
               value={displayValue(line)}
               on:change={(event) => updateValue(line, event.currentTarget.value)}
             />

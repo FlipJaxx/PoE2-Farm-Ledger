@@ -19,6 +19,7 @@
     DashboardData,
     FarmSession,
     Mechanic,
+    RefreshResult,
     ReportsData,
     SessionDetail,
     SessionLine,
@@ -43,6 +44,9 @@
   let pendingUpdate: Update | null = null;
   let updating = false;
   let updateProgress = '';
+  let priceRefreshLoading = false;
+  let priceRefreshResult = '';
+  let priceRefreshFailed = false;
 
   let newSession = {
     strategy_id: null as number | null,
@@ -152,6 +156,8 @@
 
   async function loadRoute() {
     error = '';
+    priceRefreshResult = '';
+    priceRefreshFailed = false;
     try {
       if (path === '/') dashboard = await api.dashboard();
       if (path === '/sessions/active') active = await api.activeSession();
@@ -311,6 +317,25 @@
   async function saveCurrency(currency: Currency) {
     await api.updateCurrencyValue(currency.id, Number(currency.value_in_exalts) || 0);
     await refreshDivineRate();
+  }
+
+  async function refreshCurrencyPrices() {
+    priceRefreshLoading = true;
+    priceRefreshResult = '';
+    priceRefreshFailed = false;
+    try {
+      const result: RefreshResult = await api.refreshCurrencyPrices();
+      currencies = await api.currencies();
+      const divine = currencies.find((currency) => currency.name === 'Divine Orb');
+      setDivineRate(divine?.value_in_exalts ?? 120);
+      const skipped = result.skipped.length ? result.skipped.join(', ') : 'ingen';
+      priceRefreshResult = `Oppdaterte ${result.updated.length} valutaer fra ${result.league}. Hoppet over: ${skipped}.`;
+    } catch (err) {
+      priceRefreshFailed = true;
+      priceRefreshResult = String(err);
+    } finally {
+      priceRefreshLoading = false;
+    }
   }
 
   async function moveCurrency(currency: Currency, direction: -1 | 1) {
@@ -619,6 +644,14 @@
       <div class="two-col">
         <section class="panel">
           <h2>Currencies</h2>
+          <div class="inline-form">
+            <button on:click={refreshCurrencyPrices} disabled={priceRefreshLoading}>
+              {priceRefreshLoading ? 'Henter priser...' : 'Hent priser fra poe2scout'}
+            </button>
+          </div>
+          {#if priceRefreshResult}
+            <div class="notice" class:danger={priceRefreshFailed}>{priceRefreshResult}</div>
+          {/if}
           <PriceTable
             rows={currencies}
             valueKey="value_in_exalts"

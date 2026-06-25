@@ -2,6 +2,7 @@ mod calculations;
 mod commands;
 mod db;
 mod models;
+mod poe2scout;
 mod schema;
 
 use db::AppState;
@@ -26,6 +27,7 @@ pub fn run() {
             commands::cancel_session,
             commands::list_sessions,
             commands::list_currencies,
+            poe2scout::refresh_currency_prices,
             commands::update_currency_value,
             commands::update_currency_order,
             commands::create_custom_currency,

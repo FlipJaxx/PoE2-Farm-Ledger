@@ -933,8 +933,14 @@ fn session_select_sql(tail: &str) -> String {
 fn session_loot_rows(conn: &Connection, session_id: i64) -> Result<Vec<SessionLine>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT id, session_id, item_type, item_name, count, value_in_exalts_snapshot, total_value_exalts
-             FROM session_loot WHERE session_id = ?1 ORDER BY item_type, item_name",
+            "SELECT sl.id, sl.session_id, sl.item_type, sl.item_name, sl.count, sl.value_in_exalts_snapshot, sl.total_value_exalts
+             FROM session_loot sl
+             LEFT JOIN currencies c ON c.name = sl.item_name
+             WHERE sl.session_id = ?1
+             ORDER BY
+                 CASE sl.item_type WHEN 'currency' THEN 0 WHEN 'chase' THEN 1 ELSE 2 END,
+                 COALESCE(c.display_order, 1000000),
+                 sl.item_name",
         )
         .map_err(|err| err.to_string())?;
     let rows = stmt
@@ -1032,7 +1038,7 @@ fn get_strategy_row(conn: &Connection, id: i64) -> Result<Strategy, String> {
     .map_err(|err| err.to_string())
 }
 
-fn insert_price_snapshot(
+pub(crate) fn insert_price_snapshot(
     conn: &Connection,
     name: &str,
     item_type: &str,

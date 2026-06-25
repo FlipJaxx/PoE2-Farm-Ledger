@@ -19,8 +19,8 @@
       <tr>
         <td><input bind:value={line.investment_type} on:change={() => updateInvestment(line)} /></td>
         <td>{line.item_name}</td>
-        <td><input type="number" min="0" step="0.01" bind:value={line.count} on:change={() => updateInvestment(line)} /></td>
-        <td><input type="number" min="0" step="0.01" bind:value={line.value_in_exalts_snapshot} on:change={() => updateInvestment(line)} /></td>
+        <td><input type="number" min="0" step="1" bind:value={line.count} on:change={() => updateInvestment(line)} /></td>
+        <td><input type="number" min="0" step="any" bind:value={line.value_in_exalts_snapshot} on:change={() => updateInvestment(line)} /></td>
         <td>{fmt(line.total_value_exalts)} ex</td>
         {#if removeInvestment}
           <td class="row-actions"><button class="ghost danger-button" on:click={() => removeInvestment?.(line)}>Remove</button></td>

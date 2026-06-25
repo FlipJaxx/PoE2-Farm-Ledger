@@ -68,8 +68,8 @@
           <tr>
             <td><input bind:value={row.investment_type} on:change={syncValue} /></td>
             <td><input bind:value={row.item_name} required on:change={syncValue} /></td>
-            <td><input type="number" min="0" step="0.01" bind:value={row.count} on:change={syncValue} /></td>
-            <td><input type="number" min="0" step="0.01" bind:value={row.value_in_exalts} on:change={syncValue} /></td>
+            <td><input type="number" min="0" step="1" bind:value={row.count} on:change={syncValue} /></td>
+            <td><input type="number" min="0" step="any" bind:value={row.value_in_exalts} on:change={syncValue} /></td>
             <td class="row-actions"><button class="ghost danger-button" on:click={() => removeRow(index)}>Remove</button></td>
           </tr>
         {/each}

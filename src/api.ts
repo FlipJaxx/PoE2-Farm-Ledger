@@ -7,6 +7,7 @@ import type {
   Mechanic,
   ReportRow,
   ReportsData,
+  RefreshResult,
   SessionDetail,
   SessionLine,
   Strategy
@@ -22,6 +23,7 @@ const tauriApi = {
   createMechanic: (input: Record<string, unknown>) => invoke<Mechanic>('create_mechanic', { input }),
   strategies: () => invoke<Strategy[]>('list_strategies'),
   currencies: () => invoke<Currency[]>('list_currencies'),
+  refreshCurrencyPrices: () => invoke<RefreshResult>('refresh_currency_prices'),
   chaseItems: () => invoke<ChaseItem[]>('list_chase_items'),
   reports: () => invoke<ReportsData>('get_reports_data'),
   createSession: (input: Record<string, unknown>) => invoke<FarmSession>('create_session', { input }),
@@ -377,6 +379,9 @@ function createBrowserApi() {
       loadStore()
         .currencies.filter((row) => row.active)
         .sort((a, b) => a.display_order - b.display_order || a.name.localeCompare(b.name)),
+    refreshCurrencyPrices: async (): Promise<RefreshResult> => {
+      throw new Error('poe2scout price refresh is only available in the desktop app');
+    },
     chaseItems: async () => loadStore().chaseItems.filter((row) => row.active),
     reports: async () => {
       const store = loadStore();
