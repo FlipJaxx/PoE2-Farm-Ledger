@@ -42,7 +42,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: 'Exile Farm Ledger ${{ github.ref_name }} test release'
-          releaseBody: 'Test release for Exile Farm Ledger. Windows may show SmartScreen warnings because the installer is not code-signed.'
+          releaseName: 'Exile Farm Ledger ${{ github.ref_name }}'
+          releaseBody: 'Stable release for Exile Farm Ledger. Windows may show SmartScreen warnings because the installer is not code-signed.'
           releaseDraft: false
-          prerelease: true
+          prerelease: false
