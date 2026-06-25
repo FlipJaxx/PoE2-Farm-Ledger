@@ -241,6 +241,11 @@ h2 {
   padding: 12px 14px;
 }
 
+.notice.compact {
+  margin-bottom: 0;
+  padding: 9px 12px;
+}
+
 .notice.danger {
   border-color: #934b46;
   color: #ffcbc7;
@@ -414,6 +419,19 @@ label {
   align-items: end;
 }
 
+.price-refresh-row {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 10px;
+  align-items: stretch;
+  margin-bottom: var(--space-4);
+}
+
+.price-refresh-row button {
+  min-width: 210px;
+  white-space: nowrap;
+}
+
 .mechanic-form {
   grid-template-columns: minmax(180px, 0.6fr) minmax(240px, 1fr) auto;
   margin: 0 0 14px;
@@ -460,5 +478,14 @@ label {
 
   .inline-form {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .price-refresh-row {
+    grid-template-columns: 1fr;
+  }
+
+  .price-refresh-row button {
+    width: max-content;
+    max-width: 100%;
   }
 }

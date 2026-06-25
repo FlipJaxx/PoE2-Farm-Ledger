@@ -328,8 +328,8 @@
       currencies = await api.currencies();
       const divine = currencies.find((currency) => currency.name === 'Divine Orb');
       setDivineRate(divine?.value_in_exalts ?? 120);
-      const skipped = result.skipped.length ? result.skipped.join(', ') : 'ingen';
-      priceRefreshResult = `Oppdaterte ${result.updated.length} valutaer fra ${result.league}. Hoppet over: ${skipped}.`;
+      const skipped = result.skipped.length ? result.skipped.join(', ') : 'none';
+      priceRefreshResult = `Updated ${result.updated.length} currencies from ${result.league}. Skipped: ${skipped}.`;
     } catch (err) {
       priceRefreshFailed = true;
       priceRefreshResult = String(err);
@@ -644,14 +644,14 @@
       <div class="two-col">
         <section class="panel">
           <h2>Currencies</h2>
-          <div class="inline-form">
+          <div class="price-refresh-row">
             <button on:click={refreshCurrencyPrices} disabled={priceRefreshLoading}>
-              {priceRefreshLoading ? 'Henter priser...' : 'Hent priser fra poe2scout'}
+              {priceRefreshLoading ? 'Fetching prices...' : 'Fetch prices from poe2scout'}
             </button>
+            {#if priceRefreshResult}
+              <div class="notice compact" class:danger={priceRefreshFailed}>{priceRefreshResult}</div>
+            {/if}
           </div>
-          {#if priceRefreshResult}
-            <div class="notice" class:danger={priceRefreshFailed}>{priceRefreshResult}</div>
-          {/if}
           <PriceTable
             rows={currencies}
             valueKey="value_in_exalts"
