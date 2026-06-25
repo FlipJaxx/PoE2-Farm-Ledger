@@ -56,9 +56,7 @@ pub struct UpdatedCurrency {
 }
 
 #[tauri::command]
-pub async fn refresh_currency_prices(
-    state: State<'_, AppState>,
-) -> Result<RefreshResult, String> {
+pub async fn refresh_currency_prices(state: State<'_, AppState>) -> Result<RefreshResult, String> {
     let client = reqwest::Client::builder()
         .user_agent(format!(
             "ExileFarmLedger/{} (+CONTACT_INFO_HERE)",
@@ -90,10 +88,14 @@ pub async fn refresh_currency_prices(
         let mut stmt = tx
             .prepare("SELECT id, name FROM currencies WHERE active = 1")
             .map_err(|err| err.to_string())?;
-        stmt.query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })
             .map_err(|err| err.to_string())?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|err| err.to_string())?
+            .map_err(|err| err.to_string())?;
+        rows
     };
 
     let mut updated = Vec::new();

@@ -654,9 +654,10 @@ fn seed_session_price_rows(
     };
     let mut stmt = conn.prepare(&sql).map_err(|err| err.to_string())?;
     let rows: Vec<(String, f64)> = if bind_names {
-        stmt.query_map(rusqlite::params_from_iter(default_chase_names.iter()), |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
-        })
+        stmt.query_map(
+            rusqlite::params_from_iter(default_chase_names.iter()),
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?)),
+        )
         .map_err(|err| err.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|err| err.to_string())?
@@ -680,7 +681,10 @@ fn seed_session_price_rows(
     Ok(())
 }
 
-fn strategy_default_chase_names(conn: &Connection, strategy_id: i64) -> Result<Vec<String>, String> {
+fn strategy_default_chase_names(
+    conn: &Connection,
+    strategy_id: i64,
+) -> Result<Vec<String>, String> {
     let raw = conn
         .query_row(
             "SELECT default_chase_items FROM strategies WHERE id = ?1",
@@ -732,9 +736,7 @@ fn apply_strategy_defaults(
         .map_err(|err| err.to_string())?;
     }
 
-    if let Ok(rows) =
-        serde_json::from_str::<Vec<DefaultInvestmentRow>>(&default_investment_rows)
-    {
+    if let Ok(rows) = serde_json::from_str::<Vec<DefaultInvestmentRow>>(&default_investment_rows) {
         for row in rows {
             let item_name = row.item_name.trim();
             if item_name.is_empty() {
