@@ -78,7 +78,12 @@ pub async fn refresh_currency_prices(state: State<'_, AppState>) -> Result<Refre
 
     let prices_in_exalts = base_prices
         .into_iter()
-        .map(|(name, price)| (name, price / exalted))
+        .map(|(name, price)| {
+            // Integer display is intentional for fetched prices. Values below ~0.5 ex round to 0
+            // and can still be corrected manually in the price table when needed.
+            let value_in_exalts = (price / exalted).round();
+            (name, value_in_exalts)
+        })
         .collect::<HashMap<_, _>>();
     let fetched_at = Utc::now().to_rfc3339();
 
