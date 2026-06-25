@@ -58,11 +58,21 @@ The goal is to make farm testing easier to compare over time:
 ### Prices
 
 - Edit currency values in Exalted Orb units.
+- Fetch current currency prices from poe2scout in the desktop app.
+- Store fetched currency values as whole Exalted Orb values to keep the price overview compact.
 - Create custom currencies.
 - Reorder currencies with Up/Down controls.
 - Edit chase item values.
 - Create custom chase items.
 - Friendly validation is shown for missing names and duplicate names.
+
+poe2scout refresh only updates currencies that already exist in the local price list. Fetched values are converted to Exalted Orb units, rounded to the nearest whole exalt, and written together with matching price snapshots. Manual currency and chase item edits still support decimal values.
+
+### Updates
+
+- Checks GitHub releases for app updates on startup.
+- Shows an update banner when a newer release is available.
+- Installs updates through Tauri's signed updater artifacts.
 
 ### Reports
 
@@ -194,5 +204,6 @@ assets/
 
 - Historical sessions keep the values captured when the session was created or edited.
 - Recalculation of historical sessions with current prices is intentionally left for a later version.
-- Currency and chase item prices are manually maintained.
+- Currency prices can be refreshed from poe2scout or maintained manually.
+- Chase item prices are manually maintained.
 - Strategy defaults currently apply notes and investment rows when a session starts.
