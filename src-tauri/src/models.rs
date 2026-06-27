@@ -67,6 +67,8 @@ pub struct FarmSession {
     pub maps_per_hour: f64,
     pub divine_value_exalts_snapshot: f64,
     pub divine_per_hour: f64,
+    pub accumulated_seconds: i64,
+    pub segment_started_at: Option<String>,
 }
 
 #[derive(Debug, Serialize)]

@@ -24,6 +24,8 @@ pub fn run() {
             commands::delete_session_loot_line,
             commands::delete_session_investment_line,
             commands::stop_session,
+            commands::pause_session,
+            commands::resume_session,
             commands::cancel_session,
             commands::list_sessions,
             commands::list_currencies,

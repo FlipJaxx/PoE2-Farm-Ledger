@@ -36,6 +36,8 @@ const tauriApi = {
   deleteInvestmentLine: (lineId: number) => invoke<SessionDetail>('delete_session_investment_line', { lineId }),
   stopSession: (sessionId: number) => invoke<FarmSession>('stop_session', { sessionId }),
   cancelSession: (sessionId: number) => invoke<FarmSession>('cancel_session', { sessionId }),
+  pauseSession: (sessionId: number) => invoke<FarmSession>('pause_session', { sessionId }),
+  resumeSession: (sessionId: number) => invoke<FarmSession>('resume_session', { sessionId }),
   updateCurrencyValue: (id: number, valueInExalts: number) =>
     invoke<void>('update_currency_value', { id, valueInExalts }),
   updateCurrencyOrder: (currencyIds: number[]) => invoke<void>('update_currency_order', { currencyIds }),
@@ -260,10 +262,13 @@ function recalculate(store: Store, sessionId: number) {
 
   const loot = detail.loot.reduce((sum, line) => sum + line.total_value_exalts, 0);
   const investment = detail.investments.reduce((sum, line) => sum + line.total_value_exalts, 0);
+  const anchor = session.segment_started_at ?? session.started_at;
   const duration =
     session.status === 'running'
-      ? Math.max(0, Math.floor((Date.now() - new Date(session.started_at).getTime()) / 1000))
-      : session.duration_seconds;
+      ? (session.accumulated_seconds ?? 0) + Math.max(0, Math.floor((Date.now() - new Date(anchor).getTime()) / 1000))
+      : session.status === 'paused'
+        ? (session.accumulated_seconds ?? 0)
+        : session.duration_seconds;
   const hours = duration / 3600;
 
   session.duration_seconds = duration;
@@ -338,7 +343,7 @@ function createBrowserApi() {
       const totalProfit = completed.reduce((sum, row) => sum + row.net_profit_exalts, 0);
       const divine = divineRateForStore(store);
       return {
-        active_session: store.sessions.find((row) => row.status === 'running') ?? null,
+        active_session: store.sessions.find((row) => row.status === 'running' || row.status === 'paused') ?? null,
         recent_sessions: store.sessions.slice(0, 6),
         best_strategies: reportsFor(store, 'strategy_name', 5),
         total_sessions: completed.length,
@@ -350,7 +355,7 @@ function createBrowserApi() {
     },
     activeSession: async () => {
       const store = loadStore();
-      const active = store.sessions.find((row) => row.status === 'running');
+      const active = store.sessions.find((row) => row.status === 'running' || row.status === 'paused');
       return active ? sessionDetail(store, active.id) : null;
     },
     session: async (id: number) => sessionDetail(loadStore(), id),
@@ -389,7 +394,8 @@ function createBrowserApi() {
     },
     createSession: async (input: Record<string, unknown>) => {
       const store = loadStore();
-      if (store.sessions.some((row) => row.status === 'running')) throw new Error('Only one farming session can be running at a time');
+      if (store.sessions.some((row) => row.status === 'running' || row.status === 'paused'))
+        throw new Error('Only one farming session can be running or paused at a time');
       const id = nextId(store);
       const strategyId = Number(input.strategy_id) || null;
       const strategy = strategyId ? store.strategies.find((row) => row.id === strategyId) : undefined;
@@ -420,7 +426,9 @@ function createBrowserApi() {
         profit_per_map_exalts: 0,
         maps_per_hour: 0,
         divine_value_exalts_snapshot: divineRateForStore(store),
-        divine_per_hour: 0
+        divine_per_hour: 0,
+        accumulated_seconds: 0,
+        segment_started_at: new Date().toISOString()
       };
       store.sessions.unshift(session);
       store.details[id] = {
@@ -547,8 +555,40 @@ function createBrowserApi() {
       const store = loadStore();
       const session = store.sessions.find((row) => row.id === sessionId);
       if (!session) throw new Error('Session not found');
+      if (session.status === 'running') {
+        const anchor = session.segment_started_at ?? session.started_at;
+        session.accumulated_seconds =
+          (session.accumulated_seconds ?? 0) + Math.max(0, Math.floor((Date.now() - new Date(anchor).getTime()) / 1000));
+      }
+      session.duration_seconds = session.accumulated_seconds ?? 0;
+      session.segment_started_at = null;
       session.status = 'completed';
       session.ended_at = new Date().toISOString();
+      recalculate(store, sessionId);
+      saveStore(store);
+      return session;
+    },
+    pauseSession: async (sessionId: number) => {
+      const store = loadStore();
+      const session = store.sessions.find((row) => row.id === sessionId);
+      if (!session) throw new Error('Session not found');
+      if (session.status !== 'running') throw new Error('Only a running session can be paused');
+      const anchor = session.segment_started_at ?? session.started_at;
+      session.accumulated_seconds =
+        (session.accumulated_seconds ?? 0) + Math.max(0, Math.floor((Date.now() - new Date(anchor).getTime()) / 1000));
+      session.status = 'paused';
+      session.segment_started_at = null;
+      recalculate(store, sessionId);
+      saveStore(store);
+      return session;
+    },
+    resumeSession: async (sessionId: number) => {
+      const store = loadStore();
+      const session = store.sessions.find((row) => row.id === sessionId);
+      if (!session) throw new Error('Session not found');
+      if (session.status !== 'paused') throw new Error('Only a paused session can be resumed');
+      session.status = 'running';
+      session.segment_started_at = new Date().toISOString();
       recalculate(store, sessionId);
       saveStore(store);
       return session;

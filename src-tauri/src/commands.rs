@@ -90,13 +90,13 @@ pub fn create_session(
     let conn = state.connection()?;
     let running: i64 = conn
         .query_row(
-            "SELECT COUNT(*) FROM farm_sessions WHERE status = 'running'",
+            "SELECT COUNT(*) FROM farm_sessions WHERE status IN ('running','paused')",
             [],
             |row| row.get(0),
         )
         .map_err(|err| err.to_string())?;
     if running > 0 {
-        return Err("Only one farming session can be running at a time".to_string());
+        return Err("Only one farming session can be running or paused at a time".to_string());
     }
 
     let divine_value: f64 = conn
@@ -109,8 +109,8 @@ pub fn create_session(
     let now = Utc::now().to_rfc3339();
     conn.execute(
         "INSERT INTO farm_sessions
-        (strategy_id, strategy_name, mechanic_id, mechanic_name, character_name, league, map_tier, notes, status, started_at, divine_value_exalts_snapshot)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'running', ?9, ?10)",
+        (strategy_id, strategy_name, mechanic_id, mechanic_name, character_name, league, map_tier, notes, status, started_at, divine_value_exalts_snapshot, segment_started_at)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'running', ?9, ?10, ?11)",
         params![
             input.strategy_id,
             input.strategy_name,
@@ -121,7 +121,8 @@ pub fn create_session(
             input.map_tier,
             input.notes,
             now,
-            divine_value
+            divine_value,
+            now
         ],
     )
     .map_err(|err| err.to_string())?;
@@ -232,14 +233,19 @@ pub fn delete_session_investment_line(
 pub fn stop_session(state: State<'_, AppState>, session_id: i64) -> Result<FarmSession, String> {
     let conn = state.connection()?;
     let session = get_session_row(&conn, session_id)?;
-    if session.status != "running" {
-        return Err("Only a running session can be stopped".to_string());
+    if session.status != "running" && session.status != "paused" {
+        return Err("Only an active session can be stopped".to_string());
     }
     let ended_at = Utc::now();
-    let started_at = chrono::DateTime::parse_from_rfc3339(&session.started_at)
-        .map_err(|err| err.to_string())?
-        .with_timezone(&Utc);
-    let duration_seconds = (ended_at - started_at).num_seconds().max(0);
+    let duration_seconds = if session.status == "running" {
+        let anchor = session.segment_started_at.clone()
+            .unwrap_or_else(|| session.started_at.clone());
+        let segment_start = chrono::DateTime::parse_from_rfc3339(&anchor)
+            .map_err(|err| err.to_string())?.with_timezone(&Utc);
+        session.accumulated_seconds.max(0) + (ended_at - segment_start).num_seconds().max(0)
+    } else {
+        session.accumulated_seconds.max(0)
+    };
     let (loot, investment) = session_line_sums(&conn, session_id)?;
     let totals = session_totals(
         loot,
@@ -252,7 +258,8 @@ pub fn stop_session(state: State<'_, AppState>, session_id: i64) -> Result<FarmS
         "UPDATE farm_sessions SET status = 'completed', ended_at = ?1, duration_seconds = ?2,
          total_loot_value_exalts = ?3, total_investment_value_exalts = ?4, net_profit_exalts = ?5,
          profit_per_hour_exalts = ?6, profit_per_map_exalts = ?7, maps_per_hour = ?8,
-         divine_per_hour = ?9, updated_at = CURRENT_TIMESTAMP WHERE id = ?10",
+         divine_per_hour = ?9, accumulated_seconds = ?2, segment_started_at = NULL,
+         updated_at = CURRENT_TIMESTAMP WHERE id = ?10",
         params![
             ended_at.to_rfc3339(),
             duration_seconds,
@@ -274,10 +281,49 @@ pub fn stop_session(state: State<'_, AppState>, session_id: i64) -> Result<FarmS
 pub fn cancel_session(state: State<'_, AppState>, session_id: i64) -> Result<FarmSession, String> {
     let conn = state.connection()?;
     conn.execute(
-        "UPDATE farm_sessions SET status = 'cancelled', ended_at = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2 AND status = 'running'",
+        "UPDATE farm_sessions SET status = 'cancelled', ended_at = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2 AND status IN ('running','paused')",
         params![Utc::now().to_rfc3339(), session_id],
     )
     .map_err(|err| err.to_string())?;
+    get_session_row(&conn, session_id)
+}
+
+#[tauri::command]
+pub fn pause_session(state: State<'_, AppState>, session_id: i64) -> Result<FarmSession, String> {
+    let conn = state.connection()?;
+    let session = get_session_row(&conn, session_id)?;
+    if session.status != "running" {
+        return Err("Only a running session can be paused".to_string());
+    }
+    let anchor = session.segment_started_at
+        .ok_or_else(|| "Running session is missing its segment start".to_string())?;
+    let segment_start = chrono::DateTime::parse_from_rfc3339(&anchor)
+        .map_err(|err| err.to_string())?.with_timezone(&Utc);
+    let accumulated = session.accumulated_seconds.max(0)
+        + (Utc::now() - segment_start).num_seconds().max(0);
+    conn.execute(
+        "UPDATE farm_sessions SET status = 'paused', accumulated_seconds = ?1,
+         segment_started_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?2",
+        params![accumulated, session_id],
+    ).map_err(|err| err.to_string())?;
+    refresh_session_totals(&conn, session_id)?;
+    get_session_row(&conn, session_id)
+}
+
+#[tauri::command]
+pub fn resume_session(state: State<'_, AppState>, session_id: i64) -> Result<FarmSession, String> {
+    let conn = state.connection()?;
+    let session = get_session_row(&conn, session_id)?;
+    if session.status != "paused" {
+        return Err("Only a paused session can be resumed".to_string());
+    }
+    let now = Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE farm_sessions SET status = 'running', segment_started_at = ?1,
+         updated_at = CURRENT_TIMESTAMP WHERE id = ?2",
+        params![now, session_id],
+    ).map_err(|err| err.to_string())?;
+    refresh_session_totals(&conn, session_id)?;
     get_session_row(&conn, session_id)
 }
 
@@ -767,7 +813,7 @@ fn apply_strategy_defaults(
 
 fn ensure_session_editable(conn: &Connection, session_id: i64) -> Result<(), String> {
     let session = get_session_row(conn, session_id)?;
-    if session.status == "running" || session.status == "completed" {
+    if session.status == "running" || session.status == "paused" || session.status == "completed" {
         Ok(())
     } else {
         Err("Only running or completed sessions can be edited".to_string())
@@ -776,7 +822,7 @@ fn ensure_session_editable(conn: &Connection, session_id: i64) -> Result<(), Str
 
 fn ensure_running_session(conn: &Connection, session_id: i64) -> Result<(), String> {
     let session = get_session_row(conn, session_id)?;
-    if session.status == "running" {
+    if session.status == "running" || session.status == "paused" {
         Ok(())
     } else {
         Err("Only running session lines can be removed".to_string())
@@ -785,17 +831,20 @@ fn ensure_running_session(conn: &Connection, session_id: i64) -> Result<(), Stri
 
 fn refresh_session_totals(conn: &Connection, session_id: i64) -> Result<(), String> {
     let session = get_session_row(conn, session_id)?;
-    if session.status != "running" && session.status != "completed" {
+    if session.status != "running" && session.status != "paused" && session.status != "completed" {
         return Ok(());
     }
     let (loot, investment) = session_line_sums(conn, session_id)?;
-    let duration_seconds = if session.status == "running" {
-        let started_at = chrono::DateTime::parse_from_rfc3339(&session.started_at)
-            .map_err(|err| err.to_string())?
-            .with_timezone(&Utc);
-        (Utc::now() - started_at).num_seconds().max(0)
-    } else {
-        session.duration_seconds.max(0)
+    let duration_seconds = match session.status.as_str() {
+        "running" => {
+            let anchor = session.segment_started_at.clone()
+                .unwrap_or_else(|| session.started_at.clone());
+            let segment_start = chrono::DateTime::parse_from_rfc3339(&anchor)
+                .map_err(|err| err.to_string())?.with_timezone(&Utc);
+            session.accumulated_seconds.max(0) + (Utc::now() - segment_start).num_seconds().max(0)
+        }
+        "paused" => session.accumulated_seconds.max(0),
+        _ => session.duration_seconds.max(0),
     };
     let totals = session_totals(
         loot,
@@ -887,7 +936,7 @@ fn session_line_sums(conn: &Connection, session_id: i64) -> Result<(f64, f64), S
 
 fn active_session(conn: &Connection) -> Result<Option<FarmSession>, String> {
     conn.query_row(
-        session_select_sql("WHERE status = 'running' ORDER BY started_at DESC LIMIT 1").as_str(),
+        session_select_sql("WHERE status IN ('running','paused') ORDER BY started_at DESC LIMIT 1").as_str(),
         [],
         farm_session_from_row,
     )
@@ -928,7 +977,7 @@ fn session_select_sql(tail: &str) -> String {
         "SELECT id, strategy_id, strategy_name, mechanic_id, mechanic_name, character_name, league, map_tier,
          notes, status, started_at, ended_at, duration_seconds, maps_run, total_loot_value_exalts,
          total_investment_value_exalts, net_profit_exalts, profit_per_hour_exalts, profit_per_map_exalts,
-         maps_per_hour, divine_value_exalts_snapshot, divine_per_hour FROM farm_sessions {tail}"
+         maps_per_hour, divine_value_exalts_snapshot, divine_per_hour, accumulated_seconds, segment_started_at FROM farm_sessions {tail}"
     )
 }
 
@@ -1078,6 +1127,8 @@ fn farm_session_from_row(row: &rusqlite::Row) -> rusqlite::Result<FarmSession> {
         maps_per_hour: row.get(19)?,
         divine_value_exalts_snapshot: row.get(20)?,
         divine_per_hour: row.get(21)?,
+        accumulated_seconds: row.get(22)?,
+        segment_started_at: row.get(23)?,
     })
 }
 

@@ -193,8 +193,13 @@
   }
 
   function runningDuration(session: FarmSession | null) {
-    if (!session || session.status !== 'running') return session?.duration_seconds ?? 0;
-    return Math.floor((tick - new Date(session.started_at).getTime()) / 1000);
+    if (!session) return 0;
+    if (session.status === 'paused') return session.accumulated_seconds ?? 0;
+    if (session.status !== 'running') return session.duration_seconds ?? 0;
+    const anchor = session.segment_started_at
+      ? new Date(session.segment_started_at).getTime()
+      : new Date(session.started_at).getTime();
+    return (session.accumulated_seconds ?? 0) + Math.floor((tick - anchor) / 1000);
   }
 
   async function createSession() {
@@ -315,6 +320,16 @@
     if (!active) return;
     await api.cancelSession(active.session.id);
     go('/');
+  }
+
+  async function pauseActive() {
+    if (!active) return;
+    active = { ...active, session: await api.pauseSession(active.session.id) };
+  }
+
+  async function resumeActive() {
+    if (!active) return;
+    active = { ...active, session: await api.resumeSession(active.session.id) };
   }
 
   async function saveCurrency(currency: Currency) {
@@ -558,6 +573,7 @@
     {:else if path === '/sessions/active'}
       <header class="page-head">
         <h1>Active Session</h1>
+        {#if active && active.session.status === 'paused'}<span class="badge paused">Paused</span>{/if}
         {#if active}<div class="timer">{duration(runningDuration(active.session))}</div>{/if}
       </header>
       {#if !active}
@@ -609,6 +625,11 @@
         </section>
 
         <div class="actions">
+          {#if active.session.status === 'running'}
+            <button on:click={pauseActive}>Pause</button>
+          {:else if active.session.status === 'paused'}
+            <button on:click={resumeActive}>Resume</button>
+          {/if}
           <button class="danger-button" on:click={cancelActive}>Cancel Session</button>
           <button on:click={stopActive}>Stop Session</button>
         </div>

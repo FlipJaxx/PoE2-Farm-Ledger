@@ -60,6 +60,8 @@ export type FarmSession = {
   maps_per_hour: number;
   divine_value_exalts_snapshot: number;
   divine_per_hour: number;
+  accumulated_seconds: number;
+  segment_started_at: string | null;
 };
 
 export type SessionLine = {

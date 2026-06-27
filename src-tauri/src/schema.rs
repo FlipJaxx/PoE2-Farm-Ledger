@@ -122,6 +122,37 @@ pub fn migrate_and_seed(conn: &Connection) -> Result<()> {
     ensure_chase_divines_column(conn)?;
     seed_chase_items(conn)?;
     seed_mechanics(conn)?;
+    ensure_session_pause_columns(conn)?;
+    Ok(())
+}
+
+fn ensure_session_pause_columns(conn: &Connection) -> Result<()> {
+    let (mut has_accumulated, mut has_segment) = (false, false);
+    {
+        let mut stmt = conn.prepare("PRAGMA table_info(farm_sessions)")?;
+        let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
+        for column in columns {
+            match column?.as_str() {
+                "accumulated_seconds" => has_accumulated = true,
+                "segment_started_at" => has_segment = true,
+                _ => {}
+            }
+        }
+    }
+    if !has_accumulated {
+        conn.execute(
+            "ALTER TABLE farm_sessions ADD COLUMN accumulated_seconds INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+    }
+    if !has_segment {
+        conn.execute("ALTER TABLE farm_sessions ADD COLUMN segment_started_at TEXT", [])?;
+        conn.execute(
+            "UPDATE farm_sessions SET segment_started_at = started_at
+             WHERE status = 'running' AND segment_started_at IS NULL",
+            [],
+        )?;
+    }
     Ok(())
 }
 
