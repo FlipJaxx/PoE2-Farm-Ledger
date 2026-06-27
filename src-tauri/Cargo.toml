@@ -1,6 +1,6 @@
 [package]
 name = "exile-farm-ledger"
-version = "0.1.2"
+version = "0.1.3"
 description = "Manual Path of Exile 2 farming ledger"
 authors = ["Exile Farm Ledger"]
 edition = "2021"
