@@ -267,6 +267,44 @@ h2 {
   color: #ffcbc7;
 }
 
+.update-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.update-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.update-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.update-notes summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.update-notes-body {
+  margin: 0.4rem 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow: auto;
+  font: inherit;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-solid);
+  color: var(--text);
+}
+
 .panel {
   margin-bottom: var(--space-5);
   padding: var(--space-4);

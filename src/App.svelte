@@ -494,13 +494,23 @@
 
   <section class="content">
     {#if updateInfo}
-      <div class="notice">
-        Version {updateInfo.version} is available.
-        <button on:click={installUpdate} disabled={updating}>
-          {updating ? (updateProgress || 'Updating...') : 'Update and restart'}
-        </button>
-        {#if !updating}
-          <button class="ghost" on:click={() => (updateInfo = null)}>Later</button>
+      <div class="notice update-banner">
+        <div class="update-head">
+          <strong>Version {updateInfo.version} is available.</strong>
+          <div class="update-actions">
+            <button on:click={installUpdate} disabled={updating}>
+              {updating ? (updateProgress || 'Updating...') : 'Update and restart'}
+            </button>
+            {#if !updating}
+              <button class="ghost" on:click={() => (updateInfo = null)}>Later</button>
+            {/if}
+          </div>
+        </div>
+        {#if updateInfo.body && updateInfo.body.trim()}
+          <details class="update-notes" open>
+            <summary>What's new in {updateInfo.version}</summary>
+            <pre class="update-notes-body">{updateInfo.body.trim()}</pre>
+          </details>
         {/if}
       </div>
     {/if}
