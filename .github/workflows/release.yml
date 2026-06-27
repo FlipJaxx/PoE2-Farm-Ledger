@@ -34,6 +34,31 @@ jobs:
       - name: Run Rust tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
 
+      - name: Extract release notes
+        id: notes
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          # Match section headers with a literal substring search rather than a
+          # regex: the Git Bash awk on windows-latest strips the backslashes from
+          # \[ \], which would turn [VERSION] into a character class and never match.
+          NOTES=$(awk -v ver="$VERSION" '
+            index($0, "## [" ver "]") == 1 { flag=1; next }
+            flag && index($0, "## [") == 1 { flag=0 }
+            flag { print }
+          ' CHANGELOG.md)
+          # strip leading/trailing blank lines only
+          NOTES=$(printf "%s\n" "$NOTES" | sed -e '/./,$!d' | sed -e :a -e '/^\n*$/{$d;N;ba}')
+          if [ -z "$NOTES" ]; then NOTES="Release ${VERSION}."; fi
+          {
+            echo "body<<__NOTES_EOF__"
+            echo "$NOTES"
+            echo ""
+            echo "---"
+            echo "Windows may show SmartScreen warnings because the installer is not code-signed."
+            echo "__NOTES_EOF__"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Build signed Tauri test release
         uses: tauri-apps/tauri-action@v0
         env:
@@ -43,6 +68,6 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'Exile Farm Ledger ${{ github.ref_name }}'
-          releaseBody: 'Stable release for Exile Farm Ledger. Windows may show SmartScreen warnings because the installer is not code-signed.'
+          releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: false
           prerelease: false
