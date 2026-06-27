@@ -35,6 +35,7 @@
   let editingHistorical = false;
   let sessions: FarmSession[] = [];
   let currencies: Currency[] = [];
+  let currencyUnit: 'exalts' | 'divines' = 'exalts';
   let chaseItems: ChaseItem[] = [];
   let mechanics: Mechanic[] = [];
   let strategies: Strategy[] = [];
@@ -47,6 +48,8 @@
   let priceRefreshLoading = false;
   let priceRefreshResult = '';
   let priceRefreshFailed = false;
+
+  $: currencyDivineRate = currencies.find((c) => c.name === 'Divine Orb')?.value_in_exalts ?? 120;
 
   let newSession = {
     strategy_id: null as number | null,
@@ -652,9 +655,18 @@
               <div class="notice compact" class:danger={priceRefreshFailed}>{priceRefreshResult}</div>
             {/if}
           </div>
+          <div class="unit-toggle">
+            <span>Show values in:</span>
+            <button class:active={currencyUnit === 'exalts'} on:click={() => (currencyUnit = 'exalts')}>Exalts</button>
+            <button class:active={currencyUnit === 'divines'} on:click={() => (currencyUnit = 'divines')}>Divines</button>
+          </div>
           <PriceTable
             rows={currencies}
             valueKey="value_in_exalts"
+            unitLabel={currencyUnit === 'divines' ? 'divines' : 'exalts'}
+            divineMode={currencyUnit === 'divines'}
+            divineRate={currencyDivineRate}
+            exaltOnlyNames={['Exalted Orb', 'Divine Orb']}
             save={saveCurrency}
             move={moveCurrency}
             remove={removeCurrency}

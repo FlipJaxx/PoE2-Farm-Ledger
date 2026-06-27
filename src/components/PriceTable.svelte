@@ -6,9 +6,29 @@
   export let move: ((row: any, direction: -1 | 1) => Promise<void>) | null = null;
   export let remove: ((row: any) => Promise<void>) | null = null;
   export let protectedNames: string[] = [];
+  export let divineMode = false;
+  export let divineRate = 0;
+  export let exaltOnlyNames: string[] = [];
+
+  function showsDivines(row: any) {
+    return divineMode && divineRate > 0 && !exaltOnlyNames.includes(row.name);
+  }
+
+  // Recompute each row's displayed value reactively. The unit props
+  // (divineMode, divineRate, exaltOnlyNames) are referenced directly here so
+  // Svelte re-runs this when the unit toggles. A bare displayValue(row) call in
+  // the markup would hide those dependencies and the inputs would not refresh.
+  $: displayRows = rows.map((row) => ({
+    row,
+    value:
+      divineMode && divineRate > 0 && !exaltOnlyNames.includes(row.name)
+        ? Number(((Number(row[valueKey]) || 0) / divineRate).toFixed(1))
+        : Number(row[valueKey])
+  }));
 
   async function commit(row: any, value: string) {
-    row[valueKey] = Number(value);
+    const entered = Number(value) || 0;
+    row[valueKey] = showsDivines(row) ? entered * divineRate : entered;
     await save(row);
   }
 
@@ -23,15 +43,15 @@
     {#if rows.length === 0}
       <tr><td class="empty" colspan={hasActions ? 3 : 2}>No entries yet.</td></tr>
     {:else}
-      {#each rows as row, index}
+      {#each displayRows as { row, value }, index}
         <tr>
           <td>{row.name}</td>
           <td>
             <input
               type="number"
               min="0"
-              step="any"
-              value={Number(row[valueKey])}
+              step={divineMode ? '0.1' : 'any'}
+              {value}
               on:change={(event) => commit(row, event.currentTarget.value)}
             />
           </td>
@@ -39,7 +59,7 @@
             <td class="row-actions">
               {#if move}
                 <button class="ghost" disabled={index === 0} on:click={() => move?.(row, -1)}>Up</button>
-                <button class="ghost" disabled={index === rows.length - 1} on:click={() => move?.(row, 1)}>Down</button>
+                <button class="ghost" disabled={index === displayRows.length - 1} on:click={() => move?.(row, 1)}>Down</button>
               {/if}
               {#if remove && !protectedNames.includes(row.name)}
                 <button class="ghost danger-button" on:click={() => remove?.(row)}>Remove</button>

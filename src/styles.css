@@ -489,3 +489,23 @@ label {
     max-width: 100%;
   }
 }
+
+.unit-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: var(--space-3);
+}
+
+.unit-toggle span {
+  color: var(--muted);
+}
+
+.unit-toggle button {
+  background: transparent;
+}
+
+.unit-toggle button.active {
+  background: var(--accent-bg);
+  color: var(--accent-fg);
+}
